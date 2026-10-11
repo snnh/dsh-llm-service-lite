@@ -13,6 +13,7 @@
     "openai-responses"
   ],
   "type": "module",
+  "sideEffects": false,
   "main": "lib/index.js",
   "types": "lib/types/index.d.ts",
   "exports": {
@@ -20,13 +21,23 @@
       "types": "./lib/types/index.d.ts",
       "default": "./lib/index.js"
     },
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg",
     "./package.json": "./package.json"
   },
   "files": [
     "lib/index.js",
-    "lib/types/**/*.d.ts"
+    "lib/types/**/*.d.ts",
+    "cordis.patch.yml",
+    "locale/*.json",
+    "icon.svg"
   ],
   "license": "MIT",
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
   "author": "snnh",
   "repository": {
     "type": "git",

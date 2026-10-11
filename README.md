@@ -21,8 +21,20 @@ dsh plugin --profile web add @snnh/dsh-llm-service-lite
 dsh plugin --profile web add github:snnh/dsh-llm-service-lite
 ```
 
-Mount it in that profile's `cordis.patch.yml` with the `providers` dictionary
-described under [Configure provider profiles](#configure-provider-profiles):
+### Mount
+
+The package declares itself a bundle (`dsh.bundle.patch`), so the install above
+also mounts its `llm-service-lite` row: one command installs and mounts, and no
+hand-written entry is needed. The mount is dormant — no route exists until a
+profile declares one.
+
+Configure it through the Models page, which writes profiles into the
+`llm-service-lite:` settings section the plugin reads live, or through an entry
+in the profile's `cordis.patch.yml` carrying the `providers` dictionary
+described under [Configure provider profiles](#configure-provider-profiles).
+The profile patch is applied after every bundle layer, so that entry's `config`
+replaces the row's empty default; the same entry also mounts the plugin in a
+composition that declares no bundle layer, because it names the module to load:
 
 ```yaml
 - id: llm-service-lite
@@ -31,6 +43,14 @@ described under [Configure provider profiles](#configure-provider-profiles):
     providers:
       # ... provider profiles, one per endpoint
 ```
+
+Mount it exactly once. When a composition already carries an `llm-service-lite`
+row — the `dsh-base` bundle of [dsh-lite](https://github.com/snnh/dsh-lite)
+ships one — that row already reaches this package, so the profile adds no bundle
+layer of its own; install the package without activating it as a bundle (for
+example `dsh plugin --profile web add -D @snnh/dsh-llm-service-lite`) and
+configure the existing row. Two rows with the same id mount two instances that
+claim one settings namespace, which fails plugin loading.
 
 ### Compatibility
 
@@ -315,6 +335,13 @@ pnpm run build        # typecheck, then tsdown: lib/types -> lib/index.js
 The package is plain ESM and bundles only its own code: every harness package
 stays external, because the profile that loads the plugin owns the single
 runtime copy of them.
+
+Beyond the runtime entry, the package carries its own declarations:
+`cordis.patch.yml` is the bundle layer that mounts the plugin row,
+`package.json`'s `dsh.bundle.patch` points at it, and `locale/*.json` plus
+`icon.svg` are the display resources a plugin inventory reads without loading
+the plugin. `tests/declaration.spec.ts` holds the three together, so keep
+`exports` and `files` covering every added asset.
 
 ## License
 

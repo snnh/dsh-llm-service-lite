@@ -19,8 +19,17 @@ dsh plugin --profile web add @snnh/dsh-llm-service-lite
 dsh plugin --profile web add github:snnh/dsh-llm-service-lite
 ```
 
-在该 profile 的 `cordis.patch.yml` 中挂载它，`providers` 字典见
-[配置服务商档案](#configure-provider-profiles)：
+### 挂载
+
+本包同时把自己声明成一个 bundle（`dsh.bundle.patch`）：上面那条安装命令会连同挂载一起完成，
+自动插入 `llm-service-lite` 行，不必再手写条目。这样挂载是休眠的——profile 声明第一条档案之前，
+本插件不注册任何路由。
+
+配置有两条路：走 Models 页面，它把服务商档案写进插件实时读取的 `llm-service-lite:` 设置段；或在该
+profile 的 `cordis.patch.yml` 里写一条带 `providers` 字典的条目，字典见
+[配置服务商档案](#configure-provider-profiles)。profile 自身的 patch 在所有 bundle 层之后应用，
+因此该条目的 `config` 会整体替换那一行的空默认值；同一条目也适用于自己声明行、不加 bundle 层的
+composition，因为它写明了要加载哪个模块：
 
 ```yaml
 - id: llm-service-lite
@@ -29,6 +38,11 @@ dsh plugin --profile web add github:snnh/dsh-llm-service-lite
     providers:
       # ... 每个端点一条服务商档案
 ```
+
+只挂载一次。若某套 composition 已经带了 `llm-service-lite` 行——[dsh-lite](https://github.com/snnh/dsh-lite)
+的 `dsh-base` bundle 就带——那一行已经接到本包，profile 不必再自己加 bundle 层：以不激活 bundle
+的方式安装（例如 `dsh plugin --profile web add -D @snnh/dsh-llm-service-lite`）并沿用既有行即可。
+两条同 id 的行会挂载两个实例，它们争用同一个设置命名空间，导致插件加载失败。
 
 ### 兼容性
 
@@ -309,6 +323,11 @@ pnpm run build        # 先类型检查，再 tsdown：lib/types -> lib/index.js
 
 本包是纯 ESM，只打包自己的代码：所有 harness 包保持 external，因为加载插件的 profile
 持有它们唯一的那份运行时拷贝。
+
+除运行入口外，本包还自带声明：`cordis.patch.yml` 是挂载插件行的 bundle 层，
+`package.json` 的 `dsh.bundle.patch` 指向它，`locale/*.json` 与 `icon.svg` 则是插件清单在不加载
+插件代码的前提下读取的显示资源。`tests/declaration.spec.ts` 把这三者绑在一起，因此新增资源时
+记得让 `exports` 与 `files` 覆盖到。
 
 ## 许可证
 

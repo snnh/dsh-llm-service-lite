@@ -8,9 +8,14 @@
  * harness seam, so a deployment configures providers once, in one place, and a
  * gateway reaches the same code path as a first-party endpoint.
  *
+ * The package is also its own bundle: `cordis.patch.yml` inserts the plugin row
+ * below, so installing it into a profile mounts it without a hand-written
+ * entry. A composition that mounts the row itself — as this example does —
+ * declares no bundle layer and uses the row's own `id` and `name`.
+ *
  * ```yaml
- * - id: llm
- *   name: '@deepseek-ai/dsh-llm-service-lite'
+ * - id: llm-service-lite
+ *   name: '@snnh/dsh-llm-service-lite'
  *   config:
  *     providers:
  *       deepseek:
@@ -35,7 +40,7 @@
  *               reasoningContent: true
  * ```
  *
- * @module @deepseek-ai/dsh-llm-service-lite
+ * @module @snnh/dsh-llm-service-lite
  */
 
 import type {} from '@deepseek-ai/dsh-settings'
@@ -81,7 +86,10 @@ export { convertOfficialProvider } from './official-catalog.ts'
 export type { OfficialCatalogConversion, OfficialCatalogProfile } from './official-catalog.ts'
 export { discoverEndpointModels } from './discovery.ts'
 
-/** Plugin name, also the default settings namespace. */
+/**
+ * Plugin name, and the settings namespace this instance owns when its mounting
+ * row declares the same id — which `cordis.patch.yml` does.
+ */
 export const name = 'llm-service-lite'
 
 /** The LLM service this plugin registers provider routes on. */

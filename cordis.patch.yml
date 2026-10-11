@@ -1,0 +1,15 @@
+# Bundle layer for @snnh/dsh-llm-service-lite.
+#
+# Installing this package as a profile bundle (dsh plugin add / plugin_manager
+# install_bundle) mounts the row below and nothing else: the plugin loads
+# dormant, holding no route until a profile declares an endpoint, so a harness
+# can carry the row before any provider is configured.
+#
+# Configure it by overriding this row in the profile's own cordis.patch.yml —
+# that layer is applied after every bundle layer, so its `config` replaces the
+# `providers` dictionary here. Mount it exactly once: a second row with the same
+# id mounts a second instance that claims the same settings namespace, which
+# fails plugin loading.
+- insert:
+    - id: llm-service-lite
+      name: '@snnh/dsh-llm-service-lite'
