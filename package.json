@@ -1,0 +1,87 @@
+{
+  "name": "@snnh/dsh-llm-service-lite",
+  "version": "0.2.1-alpha.2-lite.1",
+  "description": "Community plugin for DeepSeek Harness: a lighter LLM service with self-contained provider profiles, a declared model catalog, and the chat-completions, Anthropic Messages, and OpenAI Responses wires on the harness LLM seam.",
+  "keywords": [
+    "deepseek-harness",
+    "dsh",
+    "cordis",
+    "cordis-plugin",
+    "llm",
+    "openai-compatible",
+    "anthropic",
+    "openai-responses"
+  ],
+  "type": "module",
+  "main": "lib/index.js",
+  "types": "lib/types/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/types/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib/index.js",
+    "lib/types/**/*.d.ts"
+  ],
+  "license": "MIT",
+  "author": "snnh",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/snnh/dsh-llm-service-lite.git"
+  },
+  "homepage": "https://github.com/snnh/dsh-llm-service-lite#readme",
+  "bugs": {
+    "url": "https://github.com/snnh/dsh-llm-service-lite/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": "^22.19.0 || >=24.0.0"
+  },
+  "scripts": {
+    "build": "pnpm run typecheck && tsdown",
+    "typecheck": "tsc -b tsconfig.json",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "clean": "rm -rf lib tsconfig.tsbuildinfo",
+    "prepare": "pnpm run build"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.5-alpha.1",
+    "@deepseek-ai/cordis-plugin-loader": "^1.0.6-alpha.1",
+    "@deepseek-ai/dsh-attachment": "^0.2.1-alpha.2",
+    "@deepseek-ai/dsh-credentials": "^0.2.1-alpha.2",
+    "@deepseek-ai/dsh-launch-environment": "^0.2.1-alpha.2",
+    "@deepseek-ai/dsh-llm": "^0.2.1-alpha.2",
+    "@deepseek-ai/dsh-timeout": "^0.2.1-alpha.2"
+  },
+  "peerDependenciesMeta": {
+    "@deepseek-ai/cordis-plugin-loader": {
+      "optional": true
+    }
+  },
+  "dependencies": {
+    "@deepseek-ai/cosmokit": "1.8.6-alpha.1",
+    "@deepseek-ai/dsh-util-values": "^0.2.1-alpha.2",
+    "@deepseek-ai/schemastery": "^3.18.5-alpha.1",
+    "eventsource-parser": "^3.1.0"
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "4.0.5-alpha.1",
+    "@deepseek-ai/cordis-plugin-loader": "1.0.6-alpha.1",
+    "@deepseek-ai/dsh-attachment": "0.2.1-alpha.2",
+    "@deepseek-ai/dsh-credentials": "0.2.1-alpha.2",
+    "@deepseek-ai/dsh-launch-environment": "0.2.1-alpha.2",
+    "@deepseek-ai/dsh-llm": "0.2.1-alpha.2",
+    "@deepseek-ai/dsh-settings": "0.2.1-alpha.2",
+    "@deepseek-ai/dsh-timeout": "0.2.1-alpha.2",
+    "@types/node": "^22.20.1",
+    "tsdown": "^0.22.2",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.11"
+  }
+}
