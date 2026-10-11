@@ -1,6 +1,6 @@
 {
   "name": "@snnh/dsh-llm-service-lite",
-  "version": "0.2.1-alpha.2-lite.1",
+  "version": "0.1.0",
   "description": "Community plugin for DeepSeek Harness: a lighter LLM service with self-contained provider profiles, a declared model catalog, and the chat-completions, Anthropic Messages, and OpenAI Responses wires on the harness LLM seam.",
   "keywords": [
     "deepseek-harness",
