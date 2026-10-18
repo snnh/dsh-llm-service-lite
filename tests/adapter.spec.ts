@@ -501,6 +501,60 @@ describe('owc profiles adapter', () => {
     await expect(pending).rejects.toMatchObject({ code: 'ABORTED' })
   })
 
+
+  it('reports the request-image projection its serializer uses', () => {
+    const source = {
+      attachmentId: 'sha256:' + 'a'.repeat(64),
+      mediaType: 'image/png' as const,
+      bytes: 3 * 1024 * 1024,
+      width: 2400,
+      height: 1080,
+    }
+    const profile = routeFor('http://127.0.0.1:1/v1', {
+      models: [{
+        id: 'shot',
+        capabilities: { modalities: ['text', 'image'] },
+        imagePixelBudget: 'low',
+        imageTokens: { kind: 'area', per: 750 },
+      }],
+    })
+    const adapter = adapterFor(profile)
+    const target = adapter.imageRequestTarget('gateway', 'shot', source)
+    // The seam answer is the projection the request path asks the attachment
+    // provider for: the model's declared pixel budget, not the normalized image
+    // (which would describe a request the endpoint never receives).
+    expect(target.width).toBeLessThan(source.width)
+    expect(target.height).toBeLessThan(source.height)
+    expect(target.width * target.height).toBeLessThanOrEqual(512 * 512)
+    expect(target.maxBytes).toBe(2 * 1024 * 1024)
+    // Token pricing measures the same occurrence in the same projection.
+    const occurrence = image('sha256:a', source) as ImageBlock
+    expect(adapter.imageRequestPricing('gateway', 'shot')?.priceImages([occurrence]))
+      .toEqual([{ visualTokens: Math.ceil(target.width * target.height / 750), text: '' }])
+    expect(() => adapter.imageRequestTarget('gone', 'shot', source)).toThrowError(/not configured/)
+  })
+
+  it('settles a timeout without waiting for an abandoned request to drain', async () => {
+    const adapter = adapterFor(routeFor('http://127.0.0.1:1/v1', { streamIdleTimeoutMs: 30 }))
+    let drained = false
+    const stalled: AsyncIterableIterator<never> = {
+      [Symbol.asyncIterator]() { return this },
+      next: () => new Promise<IteratorResult<never>>(() => {}),
+      return: () => {
+        drained = true
+        return new Promise<IteratorResult<never>>(() => {})
+      },
+    }
+    // The request transport is the private seam where a stalled body read
+    // lives; a demand that never settles with a drain that never resolves is
+    // the undici case the watchdog and a detached cleanup must outlive.
+    Reflect.set(adapter, 'request', () => stalled)
+    const started = Date.now()
+    await expect(collect(adapter.stream(request()))).rejects.toMatchObject({ code: 'TIMEOUT' })
+    expect(drained).toBe(true)
+    expect(Date.now() - started).toBeLessThan(1_000)
+  })
+
   it('serves a route whose profile names no credential', async () => {
     const upstream = await provider((response, body) => { void body; textTurn(response, 'anonymous') })
     running.push(upstream)

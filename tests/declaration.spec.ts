@@ -13,7 +13,10 @@ const manifest = JSON.parse(readFileSync(new URL('../package.json', import.meta.
   sideEffects?: boolean
   exports: Record<string, unknown>
   files: string[]
-  dsh?: { bundle?: { patch?: string | string[] } }
+  dsh?: {
+    bundle?: { patch?: string | string[] }
+    client?: { platform?: string; inject?: string[] }
+  }
 }
 
 /** Language ids the harness accepts as locale filenames. */
@@ -92,5 +95,26 @@ describe('package identity', () => {
     expect(manifest.files).toContain('lib/index.js')
     // Module evaluation only declares exports; registration happens in apply().
     expect(manifest.sideEffects).toBe(false)
+  })
+})
+
+describe('browser half declaration', () => {
+  it('publishes the client entry and ships the modules it names', () => {
+    expect(manifest.exports['./client']).toMatchObject({
+      default: './lib/client.js',
+      types: './lib/types/client/index.d.ts',
+    })
+    expect(manifest.files).toContain('lib/client.js')
+    expect(manifest.files).toContain('lib/types/**/*.d.ts')
+  })
+
+  it('declares a web client that injects its locale and Plugins-page host', () => {
+    expect(manifest.dsh?.client?.platform).toBe('web')
+    expect(manifest.dsh?.client?.inject).toContain('@deepseek-ai/dsh-client-locale')
+    expect(manifest.dsh?.client?.inject).toContain('@deepseek-ai/dsh-client-ui-plugin-manager')
+  })
+
+  it('keeps the published package name unchanged', () => {
+    expect(manifest.name).toBe('@snnh/dsh-llm-service-lite')
   })
 })

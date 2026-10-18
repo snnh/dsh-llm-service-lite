@@ -365,14 +365,27 @@ describe('openai-responses replay', () => {
       .toEqual([])
   })
 
-  it('takes no identity from metadata another provider, model, or adapter wrote', () => {
+  it('does not hand another provider or model reasoning back as its own', () => {
+    // A reasoning item is the endpoint's own thought: replaying one adapter's
+    // thinking as this endpoint's reasoning_text is semantic pollution, and
+    // thinking-mode endpoints validate the items they receive. Both the text
+    // and (already) the encrypted form require the matching provider/model.
+    const content: ContentBlock[] = [{ type: 'reasoning', text: 'weighing' }, text('answer')]
+    for (const source of [
+      modelSource([{ type: 'reasoning', itemId: 'rs_1' }, { type: 'text' }], { provider: 'elsewhere' }),
+      modelSource([{ type: 'reasoning', itemId: 'rs_1' }, { type: 'text' }], { model: 'other' }),
+    ]) {
+      expect(inputOf(profile, { messages: [assistant(content, source)] }))
+        .toEqual([{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'answer', annotations: [] }] }])
+    }
+  })
+
+  it('degrades an unusable envelope from its own source to the plain text form', () => {
     // The text form needs no metadata at all — this protocol replays reasoning
-    // text as plain text — so an unusable envelope costs the identity, never
-    // the reasoning itself.
+    // text as plain text — so a same-source unusable envelope costs the
+    // identity, never the reasoning itself.
     const content: ContentBlock[] = [{ type: 'reasoning', text: 'weighing' }]
     for (const source of [
-      modelSource([{ type: 'reasoning', itemId: 'rs_1' }], { provider: 'elsewhere' }),
-      modelSource([{ type: 'reasoning', itemId: 'rs_1' }], { model: 'other' }),
       { kind: 'model', provider: 'gateway', model: 'm' } as ModelMessageSource,
       { kind: 'model', provider: 'gateway', model: 'm', replayState: 'not an envelope' } as ModelMessageSource,
       modelSource([{ type: 'text' }]),

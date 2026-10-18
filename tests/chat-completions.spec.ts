@@ -3,7 +3,7 @@ import { chatRequest, toWireMessages, translateChatStream } from '../src/chat-co
 import type { AdapterChunk } from '../src/image-output.ts'
 import type { ResolvedOwcModel, ResolvedOwcProviderProfile } from '../src/profiles.ts'
 import { resolveProfiles } from '../src/profiles.ts'
-import { assistant, image, request, requestImage, system, text, toolCall, toolResult, toolSchema, user } from './messages.ts'
+import { assistant, image, request, requestImage, system, text, toolCall, toolResult, toolResultWith, toolSchema, user } from './messages.ts'
 
 /** One resolved route from the real schema. */
 const route = (overrides: Record<string, unknown> = {}): ResolvedOwcProviderProfile => {
@@ -266,6 +266,67 @@ describe('chat-completions message translation', () => {
     ])
   })
 
+  it('carries the media a tool result produced as one user turn after its batch', () => {
+    const profile = route({ models: [{ id: 'm', capabilities: { modalities: ['text', 'image'] } }] })
+    const messages = toWireMessages(
+      request({
+        messages: [
+          assistant([toolCall('call_1', 'read_media', '{}')]),
+          toolResultWith('call_1', [text('the picture'), image('sha256:x')]),
+        ],
+      }),
+      modelOf(profile),
+      new Map([['sha256:x', requestImage('abc')]]),
+    )
+    expect(messages).toEqual([
+      {
+        role: 'assistant',
+        content: null,
+        tool_calls: [{ id: 'call_1', type: 'function', function: { name: 'read_media', arguments: '{}' } }],
+      },
+      { role: 'tool', tool_call_id: 'call_1', content: 'the picture' },
+      {
+        role: 'user',
+        content: [
+          { type: 'text', text: 'Attached media from tool result:' },
+          { type: 'image_url', image_url: { url: 'data:image/png;base64,YWJj' } },
+        ],
+      },
+    ])
+  })
+
+  it('answers an offloaded tool-result image with its placeholder, and refuses a missing version', () => {
+    const profile = route({ models: [{ id: 'm', capabilities: { modalities: ['text', 'image'] } }] })
+    const messages = toWireMessages(
+      request({
+        messages: [
+          assistant([toolCall('call_1', 'read_media', '{}')]),
+          toolResultWith('call_1', [text('the picture'), image('sha256:x', { name: 'shot.png' }, true)]),
+        ],
+      }),
+      modelOf(profile),
+      new Map(),
+    )
+    // One placeholder is text: the tool message keeps the text, and the media
+    // turn carries the deterministic placeholder instead of bytes.
+    expect(messages[1]).toEqual({ role: 'tool', tool_call_id: 'call_1', content: 'the picture' })
+    const content = messages[2]?.content
+    if (!Array.isArray(content)) throw new Error('the media turn is not a part array')
+    const placeholderText = content.map(part => part.type === 'text' ? part.text : '').join('')
+    expect(placeholderText).toContain('Attached media from tool result:')
+    expect(placeholderText).toContain('image omitted to fit request image limits')
+    expect(() => toWireMessages(
+      request({
+        messages: [
+          assistant([toolCall('call_1', 'read_media', '{}')]),
+          toolResultWith('call_1', [text('the picture'), image('sha256:y')]),
+        ],
+      }),
+      modelOf(profile),
+      new Map(),
+    )).toThrow(/without a prepared request version/)
+  })
+
   it('carries a retained image as a base64 image_url part beside its text', () => {
     const version = requestImage('abc')
     const messages = toWireMessages(
@@ -396,5 +457,21 @@ describe('chat-completions stream translation', () => {
       .rejects.toMatchObject({ code: 'RATE_LIMIT' })
     await expect(translate([{ choices: [{ finish_reason: 'stop', delta: { content: 'x' } }], usage: { prompt_tokens: 1, completion_tokens: 1, prompt_tokens_details: { cached_tokens: 5 } } }]))
       .rejects.toMatchObject({ code: 'MALFORMED_RESPONSE' })
+  })
+
+  it('names a clean empty completion EMPTY_RESPONSE, and an unusable count MALFORMED_RESPONSE', async () => {
+    // A clean sentinel over no content is the degenerate completion the
+    // harness names EMPTY_RESPONSE, not a cut connection.
+    await expect(translate([], true)).rejects.toMatchObject({ code: 'EMPTY_RESPONSE' })
+    // A cut stream with nothing at all is still a transport failure.
+    await expect(translate([], false)).rejects.toMatchObject({ code: 'TRANSPORT' })
+    // Token counts must be safe non-negative integers like every other
+    // transport requires; a fractional report is malformed, not accounting.
+    await expect(translate([
+      { choices: [{ finish_reason: 'stop', delta: { content: 'x' } }], usage: { prompt_tokens: 5.5, completion_tokens: 1.5 } },
+    ])).rejects.toMatchObject({ code: 'MALFORMED_RESPONSE' })
+    await expect(translate([
+      { choices: [{ finish_reason: 'stop', delta: { content: 'x' } }], usage: { prompt_tokens: 3, completion_tokens: -1 } },
+    ])).rejects.toMatchObject({ code: 'MALFORMED_RESPONSE' })
   })
 })

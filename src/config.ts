@@ -182,7 +182,6 @@ export const DEFAULT_STREAM_IDLE_TIMEOUT_MS = 300_000
  */
 export const DEFAULT_CONTEXT_WINDOW = 256_000
 
-/** Output capability assumed for a model the profile does not size. */
 /**
  * Output capacity a model the profile sizes nowhere falls back to, and the
  * number a blank capacity field shows as inherited. It matches the cap the
@@ -416,8 +415,11 @@ export interface Config {
   providers: Volatile<Record<string, OwcProviderProfile>>
 }
 
-/** Plain options accepted by the profile resolver. */
-export type Options = { [K in keyof Config]?: Config[K] extends Volatile<infer T> ? T : never }
+/**
+ * Plain options accepted by the profile resolver: the provider dict as a
+ * caller may hand it over, detached from the volatile schema wrapper.
+ */
+export type Options = { providers?: Record<string, OwcProviderProfile> }
 
 const capabilities: z<OwcModelCapabilities> = z.object({
   /** Accepted input modalities; omission means text only. */
@@ -436,7 +438,7 @@ const capabilities: z<OwcModelCapabilities> = z.object({
   tools: z.boolean(),
   /** Whether the model answers with images of its own; refused on the protocol with no assistant image part. */
   imageOutput: z.boolean(),
-  /** Whether the endpoint replays signed reasoning; refused until the responses transport exists. */
+  /** Whether the endpoint replays signed reasoning as its own encrypted item; the Responses wire requests and returns it verbatim. */
   responsesEncryptedReplay: z.boolean(),
   /** Whether the endpoint reads a mid-conversation system message as the effective prompt. */
   systemPromptUpdate: z.union(SYSTEM_PROMPT_UPDATES),
@@ -510,7 +512,7 @@ const providerProfile: z<OwcProviderProfile> = z.object({
   /** Extra top-level request-body fields. */
   extraBody: z.dict(z.any()),
   /** Concurrent requests this route serves before calls queue. */
-  maxConcurrent: z.number().step(1).min(1).default(DEFAULT_MAX_CONCURRENT),
+  maxConcurrent: z.number().step(1).min(1).max(Number.MAX_SAFE_INTEGER).default(DEFAULT_MAX_CONCURRENT),
   /** Maximum idle interval between two stream events for this route, in milliseconds. */
   streamIdleTimeoutMs: z.number().min(Number.MIN_VALUE).max(MAX_TIMER_DELAY_MS).default(DEFAULT_STREAM_IDLE_TIMEOUT_MS),
   /** Provider-owned retry policy executed by the agent's recovery layer. */
@@ -532,9 +534,10 @@ const providerProfile: z<OwcProviderProfile> = z.object({
 })
 
 /**
- * Runtime schema for {@link Options}. The DeepSeek channel's fields sit beside
- * the profiles because the built-in entry mounts this plugin under its own id:
- * one deployment may fill either, and the entry decides which channel answers.
+ * Runtime schema for {@link Options}: the provider routes this instance owns.
+ * The `providers` dict is volatile because a configuration surface may rewrite
+ * it live, which is what lets a stored profile change reach the next request
+ * without a remount.
  */
 export const Config = z.object({
   /** Provider profiles keyed by the route name a request selects. */

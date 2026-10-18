@@ -39,6 +39,37 @@ describe('provider failure classification', () => {
     expect(classifyFailure({}, undefined).code).toBe('SERVER')
   })
 
+  it('recognises the provider wordings the shared classifiers leave out', () => {
+    // Anthropic spells an exhausted context as a 400 whose text never says
+    // "context"; the harness names the condition CONTEXT_WINDOW_EXCEEDED and
+    // the compaction recovery path routes on that code.
+    const promptTooLong = {
+      type: 'error',
+      error: { type: 'invalid_request_error', message: 'prompt is too long: 208310 tokens > 200000 maximum' },
+    }
+    expect(classifyFailure(promptTooLong, 400)).toMatchObject({
+      code: 'CONTEXT_WINDOW_EXCEEDED',
+      message: 'prompt is too long: 208310 tokens > 200000 maximum',
+    })
+    // Anthropic's request byte-size limit names the same overload condition.
+    expect(classifyFailure({
+      type: 'error',
+      error: { type: 'request_too_large', message: 'Request exceeds the maximum allowed number of bytes.' },
+    }, 413).code).toBe('CONTEXT_WINDOW_EXCEEDED')
+    // Bedrock's Anthropic models spell input overflow differently again.
+    expect(classifyFailure({
+      error: { type: 'ValidationException', message: 'Input is too long for requested model.' },
+    }, 400).code).toBe('CONTEXT_WINDOW_EXCEEDED')
+    // An exhausted account balance is terminal quota, not an invalid request.
+    expect(classifyFailure({
+      type: 'error',
+      error: { type: 'invalid_request_error', message: 'Your credit balance is too low to access the Anthropic API.' },
+    }, 400).code).toBe('QUOTA')
+    // The shared patterns still win where they apply.
+    expect(classifyFailure({ error: { message: 'This model\'s maximum context length is 128000 tokens.' } }, 400).code)
+      .toBe('CONTEXT_WINDOW_EXCEEDED')
+  })
+
   it('accepts a retry delay only when it lies in the future', () => {
     expect(classifyFailure({}, 429, headers({ 'retry-after': '0' })).failure.providerRetryAfterMs).toBeUndefined()
     expect(classifyFailure({}, 429, headers({ 'retry-after': 'nonsense' })).failure.providerRetryAfterMs).toBeUndefined()

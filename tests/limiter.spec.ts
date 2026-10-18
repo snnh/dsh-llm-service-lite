@@ -82,3 +82,55 @@ describe('concurrency limiter', () => {
     expect(limiter.running).toBe(0)
   })
 })
+
+describe('tunable ceiling', () => {
+  it('admits queued requests immediately when the ceiling grows', async () => {
+    const limiter = new ConcurrencyLimiter(1)
+    const held = await limiter.acquire()
+    const queued = limiter.acquire()
+    expect(limiter.queued).toBe(1)
+    limiter.setMaxConcurrent(2)
+    expect(limiter.maxConcurrent).toBe(2)
+    const lease = await queued
+    expect(limiter.running).toBe(2)
+    held.release()
+    lease.release()
+    expect(limiter.running).toBe(0)
+  })
+
+  it('keeps one FIFO queue when the ceiling shrinks, admitting only below the new ceiling', async () => {
+    const limiter = new ConcurrencyLimiter(2)
+    const first = await limiter.acquire()
+    const second = await limiter.acquire()
+    const order: string[] = []
+    const third = limiter.acquire().then((lease) => { order.push('third'); return lease })
+    const fourth = limiter.acquire().then((lease) => { order.push('fourth'); return lease })
+    limiter.setMaxConcurrent(1)
+    expect(limiter.maxConcurrent).toBe(1)
+    // A release that leaves the old active set at the new ceiling admits nothing.
+    first.release()
+    expect(limiter.running).toBe(1)
+    expect(limiter.queued).toBe(2)
+    expect(await settled(third)).toBe('pending')
+    second.release()
+    const thirdLease = await third
+    expect(limiter.running).toBe(1)
+    expect(limiter.queued).toBe(1)
+    expect(order).toEqual(['third'])
+    thirdLease.release()
+    const fourthLease = await fourth
+    expect(order).toEqual(['third', 'fourth'])
+    fourthLease.release()
+    expect(limiter.running).toBe(0)
+  })
+
+  it('rejects an invalid ceiling and treats an unchanged one as a no-op', () => {
+    const limiter = new ConcurrencyLimiter(2)
+    expect(limiter.maxConcurrent).toBe(2)
+    limiter.setMaxConcurrent(2)
+    expect(limiter.maxConcurrent).toBe(2)
+    expect(() => { limiter.setMaxConcurrent(0) }).toThrow(/positive safe integer/)
+    expect(() => { limiter.setMaxConcurrent(1.5) }).toThrow(/positive safe integer/)
+    expect(() => new ConcurrencyLimiter(0)).toThrow(/positive safe integer/)
+  })
+})

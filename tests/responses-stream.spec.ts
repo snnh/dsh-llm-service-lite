@@ -162,6 +162,93 @@ describe('openai-responses stream translation', () => {
     })
   })
 
+  it('keeps no paragraph separator after the final reasoning summary part', async () => {
+    // The real event order closes every summary part, including the last one.
+    // The separator between parts belongs between them, never at the end of
+    // the block: the closing item's authoritative text is the summaries joined
+    // without a trailing blank line.
+    const item = {
+      type: 'reasoning',
+      id: 'rs_1',
+      summary: [{ type: 'summary_text', text: 'first' }, { type: 'summary_text', text: 'second' }],
+    }
+    const events = [
+      { type: 'response.output_item.added', item: reasoningItem(), output_index: 0 },
+      { type: 'response.reasoning_summary_part.added', output_index: 0, summary_index: 0 },
+      { type: 'response.reasoning_summary_text.delta', delta: 'first', output_index: 0 },
+      { type: 'response.reasoning_summary_text.done', output_index: 0, text: 'first' },
+      { type: 'response.reasoning_summary_part.done', output_index: 0, summary_index: 0 },
+      { type: 'response.reasoning_summary_part.added', output_index: 0, summary_index: 1 },
+      { type: 'response.reasoning_summary_text.delta', delta: 'second', output_index: 0 },
+      { type: 'response.reasoning_summary_text.done', output_index: 0, text: 'second' },
+      { type: 'response.reasoning_summary_part.done', output_index: 0, summary_index: 1 },
+      { type: 'response.output_item.done', item, output_index: 0 },
+      completed(),
+    ]
+    const chunks = await translate(events)
+    expect(chunks).toContainEqual({ type: 'block-end', index: 0, block: { type: 'reasoning', text: 'first\n\nsecond' } })
+    const streamed = chunks
+      .filter(chunk => chunk.type === 'reasoning-delta')
+      .map(chunk => chunk.type === 'reasoning-delta' ? chunk.text : '')
+      .join('')
+    expect(streamed).toBe('first\n\nsecond')
+  })
+
+  it('keeps an encrypted reasoning payload the terminal event alone carries', async () => {
+    // Azure-style endpoints may omit output_item.done for a reasoning item and
+    // report it only in response.completed, where its encrypted payload is the
+    // one thing a later stateless request must hand back.
+    const item = {
+      type: 'reasoning',
+      id: 'rs_1',
+      summary: [],
+      encrypted_content: 'opaque-ciphertext',
+    }
+    const chunks = await translate([
+      { type: 'response.output_item.added', item: reasoningItem('rs_1'), output_index: 0 },
+      { type: 'response.reasoning_summary_text.delta', delta: 'weigh', output_index: 0 },
+      { type: 'response.completed', response: { id: 'resp_1', status: 'completed', output: [item] } },
+    ])
+    expect(chunks).toContainEqual({ type: 'block-end', index: 0, block: { type: 'reasoning', text: 'weigh' } })
+    expect(chunks.at(-1)).toMatchObject({
+      type: 'finish',
+      replayState: { blocks: [{ type: 'reasoning', itemId: 'rs_1', item: JSON.stringify(item) }] },
+    })
+  })
+
+  it('backfills an encrypted payload onto a reasoning block the stream already closed', async () => {
+    const drained = { type: 'reasoning', id: 'rs_1', summary: [{ type: 'summary_text', text: 'weigh' }] }
+    const encrypted = { ...drained, encrypted_content: 'opaque-ciphertext' }
+    const chunks = await translate([
+      { type: 'response.output_item.added', item: reasoningItem(), output_index: 0 },
+      { type: 'response.reasoning_summary_text.delta', delta: 'weigh', output_index: 0 },
+      { type: 'response.output_item.done', item: drained, output_index: 0 },
+      { type: 'response.completed', response: { id: 'resp_1', status: 'completed', output: [encrypted] } },
+    ])
+    expect(chunks.at(-1)).toMatchObject({
+      type: 'finish',
+      replayState: { blocks: [{ type: 'reasoning', itemId: 'rs_1', item: JSON.stringify(encrypted) }] },
+    })
+  })
+
+  it('does not downgrade an encrypted payload a closing item carried', async () => {
+    // The terminal copy is normally authoritative, but it may omit the
+    // encrypted payload an output_item.done carried; the next stateless
+    // request needs that payload, so the richer copy must survive.
+    const drained = { type: 'reasoning', id: 'rs_1', summary: [{ type: 'summary_text', text: 'weigh' }] }
+    const encrypted = { ...drained, encrypted_content: 'opaque-ciphertext' }
+    const chunks = await translate([
+      { type: 'response.output_item.added', item: reasoningItem(), output_index: 0 },
+      { type: 'response.reasoning_summary_text.delta', delta: 'weigh', output_index: 0 },
+      { type: 'response.output_item.done', item: encrypted, output_index: 0 },
+      { type: 'response.completed', response: { id: 'resp_1', status: 'completed', output: [drained] } },
+    ])
+    expect(chunks.at(-1)).toMatchObject({
+      type: 'finish',
+      replayState: { blocks: [{ type: 'reasoning', itemId: 'rs_1', item: JSON.stringify(encrypted) }] },
+    })
+  })
+
   it('reads plain reasoning text as well as summaries', async () => {
     const events = [
       { type: 'response.reasoning_text.delta', delta: 'plain', output_index: 2 },

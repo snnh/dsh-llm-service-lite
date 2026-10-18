@@ -28,13 +28,19 @@ also mounts its `llm-service-lite` row: one command installs and mounts, and no
 hand-written entry is needed. The mount is dormant — no route exists until a
 profile declares one.
 
-Configure it through the Models page, which writes profiles into the
-`llm-service-lite:` settings section the plugin reads live, or through an entry
-in the profile's `cordis.patch.yml` carrying the `providers` dictionary
-described under [Configure provider profiles](#configure-provider-profiles).
-The profile patch is applied after every bundle layer, so that entry's `config`
-replaces the row's empty default; the same entry also mounts the plugin in a
-composition that declares no bundle layer, because it names the module to load:
+Two surfaces edit the same document. In the web UI, open **Plugins**, select
+this bundle, open its `llm-service-lite` row, and choose **Configure**: the
+page lists every provider, adds and removes profiles, edits the endpoint,
+protocol, capabilities and model catalog, stores an API key through the
+harness credential service, and asks an endpoint which models it serves. The
+same document can be edited by hand in the profile's own `cordis.patch.yml`
+(`$DSH_HOME/profiles/<profile>/cordis.patch.yml`; **Settings → Open
+configuration file** in the web UI opens it). Add the `providers` dictionary
+described under [Configure provider profiles](#configure-provider-profiles) to
+the `llm-service-lite` row's `config`. The profile patch is applied after every
+bundle layer, so that entry's `config` replaces the row's empty default; the
+same entry also mounts the plugin in a composition that declares no bundle
+layer, because it names the module to load:
 
 ```yaml
 - id: llm-service-lite
@@ -44,27 +50,70 @@ composition that declares no bundle layer, because it names the module to load:
       # ... provider profiles, one per endpoint
 ```
 
+After the install, refresh the Web page once: the browser half is served by
+the client module system, so the new page appears on the **Plugins** screen the
+next time the shell boots. It lives on the bundle's page and on its
+`llm-service-lite` row, where that row's **Configure** control opens it.
+
+The upstream **Models** page does not edit these profiles in harness
+0.2.1-rc.2: that page only lays out the adapter families it ships
+(`llm-deepseek`, `llm-pi-ai`), so an `llm-service-lite` row opens a read-only
+card pointing at the patch file. The plugin's own page on the **Plugins** screen
+is the in-page surface instead — it edits the row's own `config`, so a save is
+the same document the Host already loads. The page covers the fields a profile
+needs day to day; hand-written fields it does not render (`headers`,
+`extraBody`, `imageTokens`, `imagePixelBudget`, `imageMaxBytes`, `catalog`,
+`retryPolicy`, and the per-model `defaults`) are preserved by every save and
+remain editable in the patch.
+
+Credentials are named, not inlined, in a managed profile: set `apiKeyEnv` to the
+reference (`DEEPSEEK_API_KEY`, say) and store the secret through the harness
+credential service, export it in the launching environment, or keep it in the
+harness home's `.env`. The reference is resolved on every request, and a named
+reference that resolves to nothing fails the request with `MISSING_CREDENTIAL`
+instead of sending it unauthenticated. A profile imported verbatim from OWCode
+may keep its inline `apiKey`.
+
 Mount it exactly once. When a composition already carries an `llm-service-lite`
-row — the `dsh-base` bundle of [dsh-lite](https://github.com/snnh/dsh-lite)
-ships one — that row already reaches this package, so the profile adds no bundle
-layer of its own; install the package without activating it as a bundle (for
-example `dsh plugin --profile web add -D @snnh/dsh-llm-service-lite`) and
-configure the existing row. Two rows with the same id mount two instances that
-claim one settings namespace, which fails plugin loading.
+row (the archived [dsh-lite](https://github.com/snnh/dsh-lite) fork's `dsh-base`
+bundle shipped one), that row already reaches this package: install without
+activating it as a bundle — `dsh plugin --profile web add -D
+@snnh/dsh-llm-service-lite` — and configure the existing row. Keep exactly one
+layer for the row: a later layer's same-id insert replaces the earlier row and
+its **whole `config`** — patch layers never deep-merge — so a second row
+silently discards what the first configured; it does not mount a second
+instance.
+
+### Route names
+
+Route names must be unique across the adapters mounted in one composition. On
+stock upstream profiles the shipped `llm-pi-ai` catalog already declares common
+provider names (`deepseek`, `openai`, `anthropic`, and similar), so prefer a
+distinct route id that names the endpoint itself — `deepseek-direct`,
+`company-gateway` — rather than a name an installed catalog may own. A profile
+whose route name another adapter already owns is skipped with one warning naming
+the owner instead of failing the mount, the rest of the profiles register, and a
+newly written profile that claims such a name is refused where it is written;
+renaming its route is the repair. The plugin also refuses, by name, the routes
+the first-party DeepSeek channel owns; see [Use this package](#use-this-package).
 
 ### Compatibility
 
 This package drives the public seam of `@deepseek-ai/dsh-llm` and the
 `@deepseek-ai/cordis` service layer, so it runs against a published harness
 rather than a checkout: its peers are the harness packages, and the profile
-that loads it already owns the copies the runtime uses.
+that loads it already owns the copies the runtime uses. The development
+baseline is harness `0.2.1-rc.2` — `devDependencies` pin those packages and the
+test suite runs against them — while the `^0.2.1-alpha.2` peer ranges also admit
+the `0.2.1` alpha line, so an older `0.2.1` harness loads the same package.
 
-Two declarations of the [dsh-lite](https://github.com/snnh/dsh-lite) harness are
-used when the running harness carries them and skipped when it does not: the
-model-defaults registration seam a configuration surface asks for declared
-model ids, and the `outputModalities` field on a model's info. An upstream
-harness has neither, and this adapter then keeps its family defaults to the
-request path, where they still fill the fields a profile left open.
+Two declarations of the archived [dsh-lite](https://github.com/snnh/dsh-lite)
+fork are used when the running harness carries them and skipped when it does
+not: the model-defaults registration seam a configuration surface asks for
+declared model ids, and the `outputModalities` field on a model's info. Upstream
+`0.2.1-rc.2` carries neither, so both are inert there: the adapter keeps its
+family defaults on the request path, where they still fill the fields a profile
+left open, and the extra field is simply ignored by the runtime.
 
 ## Summary
 
@@ -89,7 +138,7 @@ Mount this plugin when a deployment wants to describe its model providers itself
 
 ### When to choose it
 
-This plugin adapts third-party endpoints and nothing else: every route it registers comes from a profile a deployment wrote, and the first-party DeepSeek channel keeps its own adapter. DeepSeek is that channel by default, so the route names it owns — `deepseek-official` and `deepseek-account`, registered by `@deepseek-ai/dsh-llm-deepseek-api-key` and `@deepseek-ai/dsh-llm-deepseek-account` — are refused here by name, with the owner in the diagnostic, rather than claimed and left to fail plugin loading. DeepSeek itself keeps those modules — this adapter is not a substitute for that channel. Any other route name is free: a deployment that reaches a DeepSeek-compatible endpoint through this adapter names its own route and declares that endpoint's own capabilities. Choose this adapter when the same composition serves several endpoints — a national model API, a self-hosted vLLM or SGLang gateway, and a proxy on the corporate network — and each must be described completely rather than derived from a catalog. Choose `dsh-llm-pi-ai` when a pi-ai catalog entry already supplies the protocols and model capabilities. Both adapters can be mounted together because their route names do not collide; registering a route another adapter already owns fails plugin loading.
+This plugin adapts third-party endpoints and nothing else: every route it registers comes from a profile a deployment wrote, and the first-party DeepSeek channel keeps its own adapter. DeepSeek is that channel by default, so the route names it owns — `deepseek-official` and `deepseek-account`, registered by `@deepseek-ai/dsh-llm-deepseek-api-key` and `@deepseek-ai/dsh-llm-deepseek-account` — are refused here by name, with the owner in the diagnostic, rather than claimed and left to fail plugin loading. DeepSeek itself keeps those modules — this adapter is not a substitute for that channel. Any other route name is free: a deployment that reaches a DeepSeek-compatible endpoint through this adapter names its own route and declares that endpoint's own capabilities. Choose this adapter when the same composition serves several endpoints — a national model API, a self-hosted vLLM or SGLang gateway, and a proxy on the corporate network — and each must be described completely rather than derived from a catalog. Choose `dsh-llm-pi-ai` when a pi-ai catalog entry already supplies the protocols and model capabilities. Both adapters can be mounted together: a profile whose route name another adapter already owns is reported and skipped at mount, and a write that claims such a name is refused where it is written (see [Route names](#route-names)).
 
 ### Configure provider profiles
 
@@ -99,7 +148,9 @@ This plugin adapts third-party endpoints and nothing else: every route it regist
   config:
     providers:
       # A provider reached at its published API, with the key from the seam.
-      deepseek:
+      # (`deepseek-direct`, not `deepseek`: the stock llm-pi-ai catalog already
+      # declares the plain vendor names — see Route names above.)
+      deepseek-direct:
         displayName: DeepSeek
         interfaceType: openai-chat-completions
         baseURL: https://api.deepseek.com/v1
@@ -132,7 +183,7 @@ This plugin adapts third-party endpoints and nothing else: every route it regist
               thinkingStyle: enable_thinking
       # An endpoint reached over the Responses API, with encrypted reasoning
       # replay declared.
-      openai:
+      openai-direct:
         interfaceType: openai-responses
         baseURL: https://api.openai.com/v1
         apiKeyEnv: OPENAI_API_KEY
@@ -172,6 +223,7 @@ This plugin adapts third-party endpoints and nothing else: every route it regist
 
 | Field | Default | Meaning |
 |---|---|---|
+| `displayName` | the route key | Label shown by selection surfaces; the `providers` key stays the route a request selects |
 | `enabled` | `true` | Whether the route registers at all |
 | `interfaceType` | required | `openai-chat-completions`, `anthropic-messages`, or `openai-responses`; each selects its own transport |
 | `baseURL` | protocol default | Endpoint of every model on the route; the protocol's usual host and version segment apply when omitted |
@@ -193,9 +245,23 @@ This plugin adapts third-party endpoints and nothing else: every route it regist
 | `imageOffloadByteQuantum` | `10485760` | Payload removed as one deterministic offload step |
 | `imageOffloadCountQuantum` | `20` | Occurrences removed as one deterministic offload step |
 
+Each entry of `models` describes one model the route serves:
+
+| Field | Default | Meaning |
+|---|---|---|
+| `id` | required | Exact model id sent on the wire and named by `GenerateOptions.model` |
+| `name` | the id | Display name shown by selection surfaces |
+| `contextWindow` | route `defaultContextWindow` | Context capacity in tokens |
+| `maxTokens` | route `defaultMaxTokens` | Output capability the model declares; the Responses wire also uses it as the request cap |
+| `capabilities` | none | Endpoint capabilities declared under [Declare what a model can do](#declare-what-a-model-can-do) |
+| `imagePixelBudget` | source dimensions | Pixel budget (`width × height`) each request image is projected into, or `low` for the published low-detail grid |
+| `imageMaxBytes` | adapter default (2 MiB) | Encoded-byte target for one request image; the encoder keeps the smallest ladder step when no step fits |
+| `imageTokens` | none | Visual-token accounting used to price image-bearing contexts |
+| `defaults` | none | Request parameters (`temperature`, `topP`, `topK`, `maxTokens`) the endpoint wants when the caller states none |
+
 ### Start from an official configuration file
 
-An official deployment publishes one provider file per provider — an API-keyed map of `chat:` entries. `catalog` converts such a file into this adapter's own vocabulary: the API becomes the route's `interfaceType` (`openai-completions` to `openai-chat-completions`, `openai-responses`, `anthropic-messages`), `baseUrl` becomes `baseURL`, a header set every model shares becomes the route's headers, and each chat entry becomes a model with its id, name, `contextWindow`, `maxTokens`, input modalities, and thinking levels. A model's `samplingParams` become its `defaults`, so an endpoint's own sampling settings arrive as configuration rather than as a caller concern. Fields this adapter has no counterpart for — `cost`, `compat` flags it does not model, `inputLimits`, per-model headers — are reported one line each instead of guessed, and the route still serves. The profile's own fields win over the conversion; an absent or empty `models` list keeps the catalog's models; and a file that mixes protocols or endpoints, names no chat model, or cannot be read leaves the route with a diagnostic rather than a half-converted one.
+An official deployment publishes one provider file per provider — an API-keyed map of `chat:` entries. `catalog` converts such a file into this adapter's own vocabulary: the API becomes the route's `interfaceType` (`openai-completions` to `openai-chat-completions`, `openai-responses`, `anthropic-messages`), `baseUrl` becomes `baseURL`, a header set every model shares becomes the route's headers, and each chat entry becomes a model with its id, name, `contextWindow`, `maxTokens`, input modalities, and thinking levels. A model's `samplingParams` become its `defaults`, so an endpoint's own sampling settings arrive as configuration rather than as a caller concern. Fields this adapter has no counterpart for — `cost`, `compat` flags it does not model, `inputLimits`, and model types it does not serve — are reported one line each instead of guessed, and the route still serves. A header set every entry shares becomes the route's `headers`; only header sets that disagree, which one route cannot carry, are reported. The profile's own fields win over the conversion; an absent or empty `models` list keeps the catalog's models; and a file that mixes protocols or endpoints, names no chat model, or cannot be read leaves the route with a diagnostic rather than a half-converted one.
 
 ```yaml
 providers:
@@ -210,17 +276,17 @@ A model entry's `capabilities` are declarations about the endpoint, never guesse
 
 **Family defaults.** A hand-written profile states what its author knows and leaves the rest to the model's family: `src/model-defaults.ts` is a reviewed table of what the mainstream families document — the image input a vision model takes, the effort ladder and the level its own platform applies by default, the switch spelling, and whether prior reasoning must travel back. The table only fills what the profile left open, so a profile field always wins; a family that shows no entry for a model leaves the adapter's own conservative answer in place; and nothing in it defaults a sampling parameter, because vendors disagree about the reachable ranges and the endpoint's own default beats an invented one. Each entry records the vendor documentation it came from, and only the model owner's own platform is ever a source: what a reseller or gateway requires of the same model id is not.
 
-A model entry's `defaults` state the request parameters its endpoint wants when the caller states none: `temperature`, `topP`, `topK`, and `maxTokens`. Each is written only where the caller's own request left it unstated, so a default can never override an explicit choice; `topK` is refused on `openai-responses`, which has no top-k field; and `defaults.maxTokens` is what a caller that stated no cap receives. A model's own `maxTokens` is a capacity rather than a request default, so the two OpenAI wires leave the field off when nobody asked for a cap, while the Messages transport — which requires it — takes the configured default, then the model's family cap, then 64K for a model no family speaks for.
+A model entry's `defaults` state the request parameters its endpoint wants when the caller states none: `temperature`, `topP`, `topK`, and `maxTokens`. Each is written only where the caller's own request left it unstated, so a default can never override an explicit choice; `topK` is refused on `openai-responses`, which has no top-k field; and `defaults.maxTokens` is what a caller that stated no cap receives. A model's own `maxTokens` is a capacity rather than a request default, and the three transports treat the output cap differently: `chat-completions` sends `max_tokens` only when the caller, or a declared `defaults.maxTokens`, supplied one, so an endpoint that defaults its own ceiling keeps it; `anthropic-messages` requires the field on every request and takes the caller's value, then the profile's `extraBody.max_tokens`, then `defaults.maxTokens`, then the model's family cap, then 64K for a model no family speaks for; `openai-responses` also always sends `max_output_tokens`, from the caller's value, then `defaults.maxTokens`, then the model's `maxTokens` (the route's `defaultMaxTokens` when the model declares none), raised to the API's 16-token floor.
 
 An image request needs the attachment provider mounted (`attachments`); a deployment serving text-only routes never mounts one, and a route that declares `image` without it fails the request before the endpoint sees a partial call.
 
 ### Change configuration at runtime
 
-Each operation captures the current provider set. A changed route set — or a route's display name, concurrency, or retry policy, which the registry captures at registration — re-registers the same adapter instance in place, so an in-flight request keeps the endpoint it started with and the next request sees the new one. A profile that cannot be served is refused where it is written and, when already stored, kept addressable with its diagnostic instead of taking the other routes down with it.
+Each operation captures the current provider set. A changed route set — or a route's display name or retry policy, which the registry captures at registration — re-registers the same adapter instance in place, so an in-flight request keeps the endpoint it started with and the next request sees the new one. Concurrency is admission-level rather than registration-level: changing `maxConcurrent` updates the route's existing queue on the next request instead of re-registering it, and requests already queued keep their place. A profile that cannot be served is refused where it is written and, when already stored, kept addressable with its diagnostic instead of taking the other routes down with it; a profile whose route name another adapter owns is reported and skipped at mount (see [Route names](#route-names)) instead of aborting the composition.
 
 ### Discover models from endpoints
 
-The plugin answers "which models can this endpoint serve?" for a route a configuration surface is editing or drafting. A configured route supplies its stored endpoint and credential inside the Host; a draft supplies its own. The listing is read from `GET {baseURL}/models` with bearer auth, and both published shapes are accepted: the standard `data` array and the enriched `models` map. The reply is candidate metadata a surface may offer for adoption — nothing is stored, and the profile a user saves decides what a route serves.
+The plugin answers "which models can this endpoint serve?" for a route a configuration surface is editing or drafting. A configured route supplies its stored endpoint, protocol, headers, and credential inside the Host; a draft supplies its own endpoint and protocol, and a one-shot key wins over the stored credential for that query. The listing is protocol-aware: the two OpenAI-compatible wires query `GET {baseURL}/models` with bearer auth, an Anthropic Messages route queries that protocol's own `/v1/models` listing with `x-api-key` and `anthropic-version`, and both published OpenAI-compatible shapes are accepted — the standard `data` array and the enriched `models` map. The reply is candidate metadata a surface may offer for adoption: nothing is stored, and the profile a user saves decides what a route serves. An endpoint that cannot be reached, answers without JSON, or sends more than 4 MiB fails the query with `DISCOVERY_FAILED`; an endpoint error status is reported as `INVALID_REQUEST`, and a protocol with no readable listing is refused as `INVALID_CONFIG`.
 
 ### Failures and recovery
 
@@ -238,6 +304,7 @@ Three rules shape the package. A profile is the whole truth: nothing is inferred
 | File | Role |
 |---|---|
 | `src/index.ts` | Plugin: profile resolution, route registration, directory, discovery |
+| `src/client/*` | Browser half: the provider-configuration page on the Plugins screen (`plugins.row.config`), its draft controller, validation, and the client bundle entry |
 | `src/config.ts` | Configuration schema and the profile vocabulary |
 | `src/profiles.ts` | Validation and materialization of profiles into route facts |
 | `src/models.ts` | Projection of model facts onto the seam's model vocabulary |
@@ -254,7 +321,7 @@ Three rules shape the package. A profile is the whole truth: nothing is inferred
 
 ### Registration and directory
 
-A mount with no profiles registers nothing: the plugin holds no route until its settings section supplies one, which is why the base bundle can mount it dormant. Every configured route appears in the configurable-provider directory, including one that is disabled or currently unserviceable, so a settings surface can address and repair it by name.
+A mount with no profiles registers nothing: the plugin holds no route until its settings section supplies one, which is why the base bundle can mount it dormant. Every route this instance mounts appears in the configurable-provider directory, including one that is disabled or currently unserviceable, so a settings surface can address and repair it by name. A profile skipped because another mounted adapter already owns its route name stays out of the directory — that name belongs to the other family, and renaming the profile's route is the repair (see [Route names](#route-names)).
 
 ### Wire translation
 
@@ -262,7 +329,7 @@ Three transports answer one seam. `openai-chat-completions` speaks the OpenAI-co
 
 Both also repair their protocol's pairing rules on the way out, because a durable history can hold shapes no endpoint accepts. A result whose call is gone is dropped; a call id one assistant turn declares twice, or that a later turn declares again, collapses to its first occurrence; a repeat result for one call is dropped and its first occurrence kept; a call nothing ever answered is answered with a placeholder rather than left to a 400; and the results of one parallel batch merge into the single user turn both protocols require. The repair happens in the wire projection, so the durable log is never rewritten to make a request acceptable.
 
-Reasoning is replayed only for a route that declares it and only for history this same provider and model produced. `openai-chat-completions` replays it through `reasoning_content`. `anthropic-messages` replays signed and redacted thinking blocks through adapter-private replay metadata on the assistant message, because that protocol rejects a thinking block returned without its signature; metadata another provider, another model, or another adapter wrote degrades that one turn to plain text instead of failing the request.
+Reasoning is replayed only for a route whose target model declares it, and only for history the same provider produced. `openai-chat-completions` replays it through `reasoning_content` and matches the history on the provider alone; `anthropic-messages` and `openai-responses` additionally require the source model to match, and replay signed/redacted thinking blocks or the provider's own reasoning items through adapter-private replay metadata on the assistant message. The Messages protocol rejects a thinking block returned without its signature, and metadata another provider, another model, or another adapter wrote degrades that one turn to plain text instead of failing the request.
 
 The Responses transport maps the conversation onto the API's flat item list — an assistant `message`, a `function_call` per call, and a `function_call_output` carrying the same id — and repairs that list the same way, with one difference the protocol forces: a call nothing answered is dropped rather than answered with a placeholder, because strict gateways reject a fabricated output, and a turn's parallel calls are grouped so the API folds them into one assistant turn. Its reasoning follows the model's declaration: `reasoningContent` replays the thinking text as `reasoning_text`, and `responsesEncryptedReplay` hands the provider's own item back verbatim. The protocol carries no stop sequences, so a caller's `stop` is omitted rather than approximated.
 
@@ -278,6 +345,8 @@ The Messages transport reads its prompt from `system`, else from a leading syste
 <a id="model-experience"></a>
 ## Model Experience
 
+The provider-configuration page under **Plugins** is operator-only: it edits Host configuration and contributes no model-visible prompt, tool, or context surface. The model experience described below is unchanged by the page.
+
 ### Provider request through the adapter
 
 #### What the model sees
@@ -286,7 +355,7 @@ The conversation exactly as the harness assembled it: the system prompt as a lea
 
 #### Token effect
 
-The request carries no adapter-authored prompt text. `max_tokens` is present on a chat-completions request only when the caller configured one, so an endpoint that defaults its own ceiling keeps it; the Messages protocol requires the cap, so it is always sent there, from the request, the profile's override, or the model's declared cap.
+The request carries no adapter-authored system-prompt text; the only text this adapter itself contributes is deterministic framing — the `Attached media from tool result:` note the two OpenAI wires lead a tool-result media follow-up with, a placeholder for a tool result that never landed, and the `[context trimmed]` marker for a Messages assistant turn that cannot otherwise be carried. `max_tokens` is present on a chat-completions request only when the caller configured one, so an endpoint that defaults its own ceiling keeps it; the Messages and Responses protocols require an output cap, so both always send one — from the request, the profile's `defaults`, or the model's declared cap (Responses raises a value below the API's 16-token floor).
 
 #### KV Cache effect
 
@@ -311,6 +380,7 @@ Replayed reasoning is byte-identical to what the provider returned, so a route t
 <a id="known-limitations-and-deferred-work"></a>
 
 - **Three protocols, three shapes.** Every declared protocol has a transport, and each carries that protocol's own features: the Responses API's server-side tools (`web_search_call` items) are not carried, and no `store` field is sent, so a deployment keeps provider-side state out of the request path.
+- **Configuration lives on the plugin page or in the patch, not the Models page.** The upstream Models page does not lay out this adapter's namespace; providers are edited on this bundle's page under **Plugins** (or in the profile's `cordis.patch.yml`, see [Mount](#mount)). The plugin page does not render every hand-written field, and it does not show a Model-defaults editor; those stay in the patch.
 - **Video input arrives as a file, not as moving pictures.** A declared `video` input is carried as the file handle every attachment contributes, because no wire here has a video part and the harness has no video content block yet. `image` input is carried, and so is the token accounting a profile declares through `imageTokens`; a route that declares none keeps the meter's structural heuristic, and no adapter-authored handle text travels beside the bytes, so a priced occurrence counts the visual tokens the endpoint charges and nothing this adapter invented.
 - **No adapter-side retries.** One call is one provider attempt, so the provider's retry policy is executed by `dsh-llm-retry` at the durable step boundary, and a retry re-derives the whole request.
 - **Replay metadata is protocol-specific.** The Messages transport writes and reads its own envelope for thinking signatures, and the Responses transport keeps each reasoning item (id and encrypted payload) for the model that asked for encrypted replay; neither envelope is portable across providers.
@@ -326,15 +396,21 @@ The two coexist deliberately: the catalog route is the shortest path to a known 
 ## Development
 
 ```sh
-pnpm install          # installs the published harness peers
-pnpm run typecheck    # tsc -b: src -> lib/types
-pnpm test             # vitest, tests/**/*.spec.ts
-pnpm run build        # typecheck, then tsdown: lib/types -> lib/index.js
+pnpm install              # installs the published harness peers
+pnpm run typecheck        # tsc -b: src -> lib/types
+pnpm run typecheck:tests  # tsconfig.test.json: src + tests, no emit
+pnpm run check            # typecheck, typecheck:tests, and the test suite
+pnpm test                 # vitest, tests/**/*.spec.ts
+pnpm run build            # typecheck, host bundle, then the browser bundle
 ```
 
-The package is plain ESM and bundles only its own code: every harness package
-stays external, because the profile that loads the plugin owns the single
-runtime copy of them.
+`tsconfig.test.json` typechecks the specs, which the shipping `tsconfig.json`
+does not include; CI runs `pnpm run check` on Node 22 and 24. The package is
+plain ESM and bundles only its own code: every harness package stays external,
+because the profile that loads the plugin owns the single runtime copy of them.
+`build/client-bundle.mjs` wraps the emitted browser half into the client module
+system's factory format (`lib/client.js`, the target of the `./client` export),
+leaving React and the shared UI packages to the page's frozen module table.
 
 Beyond the runtime entry, the package carries its own declarations:
 `cordis.patch.yml` is the bundle layer that mounts the plugin row,

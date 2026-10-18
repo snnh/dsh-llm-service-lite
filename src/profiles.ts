@@ -18,7 +18,7 @@ import { resolveRetryPolicy, type ResolvedRetryPolicy } from '@deepseek-ai/dsh-l
 import { deepEqualJson, isJsonValue } from '@deepseek-ai/dsh-util-values'
 import type { ImageRequestBudget } from './images.ts'
 import { LOW_DETAIL_IMAGE_PIXEL_BUDGET } from './images.ts'
-import { convertOfficialProvider } from './official-catalog.ts'
+import { convertOfficialProvider, type OfficialCatalogProfile } from './official-catalog.ts'
 import { modelDefaultRuleOf } from './model-defaults.ts'
 import {
   DEFAULT_CONTEXT_WINDOW,
@@ -625,6 +625,114 @@ export function resolveProfiles(
   return resolved
 }
 
+/** Whether one converted capacity is what the harness's model-info contract accepts. */
+function isPositiveSafeInteger(value: unknown): value is number {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value > 0
+}
+
+/**
+ * The schema's own bounds for one request-parameter default. A converted
+ * profile never meets the schema, so the same rules are applied to its values.
+ */
+const CONVERTED_DEFAULT_BOUNDS: Readonly<Record<keyof OwcModelDefaults, (value: number) => boolean>> = {
+  temperature: value => value >= 0 && value <= 2,
+  topP: value => value >= 0 && value <= 1,
+  topK: value => Number.isSafeInteger(value) && value >= 1,
+  maxTokens: value => Number.isSafeInteger(value) && value >= 1,
+}
+
+/**
+ * Sanitize the facts one official catalog conversion produced, dropping values
+ * the Config schema would have policed had they been declared directly.
+ *
+ * The conversion reads a user-supplied file, so its output has never been
+ * through this package's schema. A capacity the harness later rejects would
+ * take down `resolveModelInfo`/`prepareCall` for the whole route
+ * (`INVALID_MODEL_CONTEXT` / `INVALID_MODEL_MAX_TOKENS`), and a non-string
+ * header would throw a raw `TypeError` when a request builds its headers. Each
+ * dropped value is reported once, beside the conversion's own diagnostics, so
+ * the route still serves with everything the file did state validly.
+ * @param provider - route name, for diagnostics.
+ * @param profile - the converted profile, before the configured fields layer on top.
+ * @param interfaceType - protocol the materialized route will actually speak, which
+ *   may be the profile's own override rather than the converted one.
+ * @returns the profile without values no request could carry, and one diagnostic per drop.
+ */
+function validateConvertedCatalog(
+  provider: string,
+  profile: OfficialCatalogProfile,
+  interfaceType: InterfaceType,
+): { profile: OfficialCatalogProfile; diagnostics: readonly string[] } {
+  const prefix = `llm-service-lite: provider "${provider}" catalog`
+  const diagnostics: string[] = []
+  const report = (message: string): void => { diagnostics.push(`${prefix} ${message}`) }
+
+  const { headers: declaredHeaders, models: declaredModels, ...route } = profile
+  let headers = declaredHeaders
+  if (headers !== undefined) {
+    const unusable = Object.entries(headers).filter(([, value]) => typeof value !== 'string')
+    if (unusable.length > 0) {
+      report(
+        `${unusable.map(([name]) => `header "${name}"`).join(', ')} ${unusable.length === 1 ? 'is' : 'are'}`
+        + ' not a string; the route declares no catalog headers',
+      )
+      headers = undefined
+    }
+  }
+
+  const models = declaredModels.map((model): OwcModelProfile => {
+    const {
+      contextWindow: declaredContextWindow,
+      maxTokens: declaredMaxTokens,
+      defaults: declaredDefaults,
+      ...rest
+    } = model
+    let contextWindow = declaredContextWindow
+    if (declaredContextWindow !== undefined && !isPositiveSafeInteger(declaredContextWindow)) {
+      report(`model "${model.id}" contextWindow "${String(declaredContextWindow)}" is not a positive integer; the capacity is not carried`)
+      contextWindow = undefined
+    }
+    let maxTokens = declaredMaxTokens
+    if (declaredMaxTokens !== undefined && !isPositiveSafeInteger(declaredMaxTokens)) {
+      report(`model "${model.id}" maxTokens "${String(declaredMaxTokens)}" is not a positive integer; the capacity is not carried`)
+      maxTokens = undefined
+    }
+    let defaults: OwcModelDefaults | undefined
+    if (declaredDefaults !== undefined) {
+      const kept: OwcModelDefaults = {}
+      for (const field of ['temperature', 'topP', 'topK', 'maxTokens'] as const) {
+        const value = declaredDefaults[field]
+        if (value === undefined) continue
+        if (field === 'topK' && interfaceType === 'openai-responses') {
+          report(`model "${model.id}" defaults.topK is not carried on interfaceType "openai-responses"; that protocol has no top-k field`)
+          continue
+        }
+        if (!CONVERTED_DEFAULT_BOUNDS[field](value)) {
+          report(`model "${model.id}" defaults.${field} "${String(value)}" is outside the range the profile schema accepts; the default is not carried`)
+          continue
+        }
+        kept[field] = value
+      }
+      if (Object.keys(kept).length > 0) defaults = kept
+    }
+    return {
+      ...rest,
+      ...contextWindow === undefined ? {} : { contextWindow },
+      ...maxTokens === undefined ? {} : { maxTokens },
+      ...defaults === undefined ? {} : { defaults },
+    }
+  })
+
+  return {
+    profile: {
+      ...route,
+      ...headers === undefined ? {} : { headers },
+      models,
+    },
+    diagnostics,
+  }
+}
+
 /**
  * Materialize one profile's official-format catalog, when it names one.
  *
@@ -656,7 +764,16 @@ function materializeCatalog(
   } else {
     content = catalog
   }
-  const { profile, diagnostics } = convertOfficialProvider(content, provider)
+  const converted = convertOfficialProvider(content, provider)
+  // The conversion output has not met this package's schema; sanitize the
+  // values the schema would have policed before anything else reads them. The
+  // protocol the materialized route will speak is the profile's own when it
+  // overrides the converted one, so a per-protocol rule follows the override.
+  const validated = validateConvertedCatalog(
+    provider,
+    converted.profile,
+    source.interfaceType ?? converted.profile.interfaceType,
+  )
   // The profile's own fields win over the converted ones, which is what lets
   // one file describe a route while the deployment overrides its credential,
   // its endpoint, or its model list. `interfaceType` is optional precisely so
@@ -666,12 +783,12 @@ function materializeCatalog(
   const declaredModels = source.models ?? []
   return {
     profile: {
-      ...profile,
+      ...validated.profile,
       ...source,
-      interfaceType: source.interfaceType ?? profile.interfaceType,
-      models: declaredModels.length === 0 ? profile.models : declaredModels,
+      interfaceType: source.interfaceType ?? validated.profile.interfaceType,
+      models: declaredModels.length === 0 ? validated.profile.models : declaredModels,
     },
-    diagnostics,
+    diagnostics: [...converted.diagnostics, ...validated.diagnostics],
   }
 }
 
@@ -720,6 +837,11 @@ function unserviceable(provider: string, source: OwcProviderProfile, error: unkn
  * The facts the LLM registry captures when a route is registered, in a form
  * that compares by value: a change here must re-register, and merely reordering
  * the configuration must not.
+ *
+ * Only registry-captured state belongs here. Concurrency is deliberately
+ * absent: the registration captures the route's display metadata and retry
+ * policy, while the admission limiter is re-tuned in place on the next request,
+ * so editing `maxConcurrent` needs no route replacement.
  * @param profiles - resolved profiles.
  * @returns route facts sorted by route name.
  */
@@ -730,7 +852,6 @@ export function registrationFacts(profiles: ReadonlyMap<string, ResolvedOwcProvi
       provider: profile.provider,
       displayName: profile.displayName,
       retryPolicy: profile.retryPolicy,
-      maxConcurrent: profile.maxConcurrent,
     }))
     .sort((left, right) => left.provider.localeCompare(right.provider))
 }
@@ -830,7 +951,19 @@ function familyFactsOf(model: string): {
  * @throws Error naming the route and field that cannot be served.
  */
 export function assertServiceable(config: Options, previous?: Options): void {
-  const changed = Object.fromEntries(Object.entries(config.providers ?? {}).filter(([provider, profile]) =>
-    previous?.providers?.[provider] === undefined || !deepEqualJson(profile, previous.providers[provider])))
-  resolveProfiles(changed)
+  const providers = config.providers ?? {}
+  const previousProviders = previous?.providers
+  const changed = Object.entries(providers).filter(([provider, profile]) =>
+    previousProviders?.[provider] === undefined || !deepEqualJson(profile, previousProviders[provider]))
+  // A disabled profile serves nothing, so it only has to resolve (a deferred
+  // resolution records any diagnostic); disabling is the repair path for a
+  // stored route the current rules no longer serve, and must itself be writable.
+  // Every changed or new enabled profile is a serviceable claim and is still
+  // validated in strict mode.
+  const enforced: Record<string, OwcProviderProfile> = {}
+  for (const [provider, profile] of changed) {
+    if (profile.enabled === false) resolveProfiles({ [provider]: profile }, 'deferred')
+    else enforced[provider] = profile
+  }
+  resolveProfiles(enforced)
 }

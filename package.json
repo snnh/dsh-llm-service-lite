@@ -21,12 +21,18 @@
       "types": "./lib/types/index.d.ts",
       "default": "./lib/index.js"
     },
+    "./client": {
+      "types": "./lib/types/client/index.d.ts",
+      "default": "./lib/client.js"
+    },
     "./locale/*.json": "./locale/*.json",
     "./icon": "./icon.svg",
     "./package.json": "./package.json"
   },
   "files": [
     "lib/index.js",
+    "lib/client.js",
+    "CHANGELOG.md",
     "lib/types/**/*.d.ts",
     "cordis.patch.yml",
     "locale/*.json",
@@ -36,6 +42,15 @@
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-settings",
+        "@deepseek-ai/dsh-client-ui-plugin-manager",
+        "@deepseek-ai/dsh-api-remotes"
+      ]
     }
   },
   "author": "snnh",
@@ -54,12 +69,14 @@
     "node": "^22.19.0 || >=24.0.0"
   },
   "scripts": {
-    "build": "pnpm run typecheck && tsdown",
+    "build": "pnpm run typecheck && tsdown && node build/client-bundle.mjs",
     "typecheck": "tsc -b tsconfig.json",
     "test": "vitest run",
     "test:watch": "vitest",
     "clean": "rm -rf lib tsconfig.tsbuildinfo",
-    "prepare": "pnpm run build"
+    "prepare": "pnpm run build",
+    "typecheck:tests": "tsc -p tsconfig.test.json",
+    "check": "pnpm run typecheck && pnpm run typecheck:tests && pnpm test"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.5-alpha.1",
@@ -76,21 +93,34 @@
     }
   },
   "dependencies": {
-    "@deepseek-ai/cosmokit": "1.8.6-alpha.1",
-    "@deepseek-ai/dsh-util-values": "^0.2.1-alpha.2",
-    "@deepseek-ai/schemastery": "^3.18.5-alpha.1",
+    "@deepseek-ai/cosmokit": "1.8.6",
+    "@deepseek-ai/dsh-util-values": "^0.2.1-rc.2",
+    "@deepseek-ai/schemastery": "^3.18.5",
     "eventsource-parser": "^3.1.0"
   },
   "devDependencies": {
-    "@deepseek-ai/cordis": "4.0.5-alpha.1",
-    "@deepseek-ai/cordis-plugin-loader": "1.0.6-alpha.1",
-    "@deepseek-ai/dsh-attachment": "0.2.1-alpha.2",
-    "@deepseek-ai/dsh-credentials": "0.2.1-alpha.2",
-    "@deepseek-ai/dsh-launch-environment": "0.2.1-alpha.2",
-    "@deepseek-ai/dsh-llm": "0.2.1-alpha.2",
-    "@deepseek-ai/dsh-settings": "0.2.1-alpha.2",
-    "@deepseek-ai/dsh-timeout": "0.2.1-alpha.2",
+    "@deepseek-ai/cordis": "4.0.5",
+    "@deepseek-ai/cordis-plugin-loader": "1.0.6",
+    "@deepseek-ai/dsh-api-remotes": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-attachment": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-client-locale": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-client-store": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-client-ui-plugin-manager": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-client-ui-primitives": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-client-ui-renderer": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-client-ui-settings": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-client-ui-slots": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-credentials": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-launch-environment": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-llm": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-settings": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-timeout": "0.2.1-rc.2",
     "@types/node": "^22.20.1",
+    "@types/react": "18.3.31",
+    "@types/react-dom": "18.3.7",
+    "react": "18.3.1",
+    "react-dom": "18.3.1",
+    "rolldown": "^1.2.13",
     "tsdown": "^0.22.2",
     "typescript": "^6.0.3",
     "vitest": "^4.1.11"

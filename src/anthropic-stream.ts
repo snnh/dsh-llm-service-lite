@@ -18,7 +18,7 @@
  * @module dsh-llm-service-lite/anthropic-stream
  */
 
-import { LlmError, ToolCallId } from '@deepseek-ai/dsh-llm'
+import { CONTEXT_WINDOW_EXCEEDED_CODE, LlmError, ToolCallId } from '@deepseek-ai/dsh-llm'
 import type { ContentBlock, FinishReason, StreamChunk, TokenUsage } from '@deepseek-ai/dsh-llm'
 import { classifyFailure } from './errors.ts'
 import { REPLAY_KIND, REPLAY_VERSION } from './anthropic-messages.ts'
@@ -38,6 +38,12 @@ interface OpenBlock {
   name: string
   signature: string
   data: string
+  /**
+   * The whole tool input the block-start event stated, kept as a fallback for a
+   * stream that never sends argument fragments. Fragments are this protocol's
+   * own form of the arguments and win when they arrive.
+   */
+  seedArguments: string | undefined
 }
 
 /** Token counts as this protocol reports them across the stream. */
@@ -192,14 +198,24 @@ export async function* translateAnthropicStream(
         // is the one thing this protocol's pairing rules are made of.
         throw new LlmError('llm-service-lite: anthropic-messages stream opened a tool call without an id', 'MALFORMED_RESPONSE')
       }
+      // The protocol declares these as the block's *initial* value; a gateway
+      // that reports a whole block here (or a signature only here) must not
+      // lose it. The delta events that normally follow carry the rest.
+      const initialText = typeof block['text'] === 'string' ? block['text'] : ''
+      const initialThinking = typeof block['thinking'] === 'string' ? block['thinking'] : ''
+      const initialInput = kind === 'tool_use' ? asRecord(block['input']) : {}
+      const seedArguments = Object.keys(initialInput).length === 0 ? undefined : JSON.stringify(initialInput)
       const opened: OpenBlock = {
         index: nextIndex,
         kind,
-        text: '',
+        text: kind === 'text' ? initialText : kind === 'thinking' ? initialThinking : '',
+        // Fragments accumulate here; the start event's whole input is only a
+        // fallback for a gateway that closes the block without streaming any.
         arguments: '',
+        seedArguments,
         id,
         name: typeof block['name'] === 'string' ? block['name'] : '',
-        signature: '',
+        signature: typeof block['signature'] === 'string' ? block['signature'] : '',
         data: typeof block['data'] === 'string' ? block['data'] : '',
       }
       nextIndex += 1
@@ -215,11 +231,23 @@ export async function* translateAnthropicStream(
         blockType: kind === 'tool_use' ? 'tool-call' : kind === 'text' ? 'text' : 'reasoning',
       }
       if (kind !== 'tool_use') {
-        if (kind === 'redacted_thinking') sawOutput = true
+        if (kind === 'redacted_thinking') {
+          sawOutput = true
+          continue
+        }
+        if (opened.text.length > 0) {
+          sawOutput = true
+          yield kind === 'text'
+            ? { type: 'text-delta', index: opened.index, text: opened.text }
+            : { type: 'reasoning-delta', index: opened.index, text: opened.text }
+        }
         continue
       }
       // The call is announced as soon as its identity is known; the arguments
-      // follow as fragments, exactly as the harness correlates them.
+      // follow as fragments, exactly as the harness correlates them. An input
+      // the start event stated whole is not streamed as a delta — fragments are
+      // authoritative when they arrive, and the block-end carries the fallback
+      // for a gateway that sends none.
       sawOutput = true
       yield {
         type: 'tool-call-delta',
@@ -262,6 +290,12 @@ export async function* translateAnthropicStream(
       const opened = open.get(providerIndex)
       if (opened === undefined) continue
       open.delete(providerIndex)
+      if (opened.kind === 'tool_use' && opened.arguments.length === 0) {
+        // No argument fragments arrived: use the whole input the start event
+        // stated, or {} for a call that truly takes no arguments. Either is a
+        // raw JSON string, which the harness contract requires.
+        opened.arguments = opened.seedArguments ?? '{}'
+      }
       const entry = replay[opened.index]
       if (entry?.type === 'reasoning' && opened.kind === 'thinking' && opened.signature.length > 0) {
         entry.signature = opened.signature
@@ -297,6 +331,15 @@ export async function* translateAnthropicStream(
   // completion whose outcome nobody stated.
   if (stopReason === undefined) {
     throw new LlmError('llm-service-lite: anthropic-messages stream ended without a stop reason', 'TRANSPORT')
+  }
+  // Anthropic and Bedrock report an exhausted context window as a stop reason,
+  // not as an HTTP failure. Reporting it as a stop would silently complete a
+  // truncated turn and leave the harness's compaction recovery unreachable.
+  if (stopReason === 'model_context_window_exceeded') {
+    throw new LlmError(
+      'llm-service-lite: anthropic-messages reported that the model context window was exceeded',
+      CONTEXT_WINDOW_EXCEEDED_CODE,
+    )
   }
   const finish = finishReasonOf(stopReason, replay.some(entry => entry.type === 'tool-call'))
   const usage = usageOf(counters)

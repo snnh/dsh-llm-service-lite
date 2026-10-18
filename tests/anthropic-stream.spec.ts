@@ -249,8 +249,106 @@ describe('anthropic-messages stream translation', async () => {
     expect(await reasonOf('max_tokens')).toMatchObject({ reason: { kind: 'max-tokens' } })
     expect(await reasonOf('tool_use', true)).toMatchObject({ reason: { kind: 'tool-calls' } })
     // A reason this build does not know is still a finished turn.
-    expect(await reasonOf('model_context_window_exceeded')).toMatchObject({ reason: { kind: 'stop' } })
     expect(await reasonOf('something_new', true)).toMatchObject({ reason: { kind: 'tool-calls' } })
+  })
+
+  it('fails a turn the model context window cut off, as the harness compaction path expects', async () => {
+    // `model_context_window_exceeded` is a documented Anthropic/Bedrock stop
+    // reason. Reporting it as a stop would silently complete a truncated turn
+    // and leave the harness's CONTEXT_WINDOW_EXCEEDED recovery unreachable.
+    const events = [
+      messageStart(),
+      { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } },
+      { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'cut' } },
+      { type: 'content_block_stop', index: 0 },
+      messageDelta('model_context_window_exceeded', { output_tokens: 1 }),
+      { type: 'message_stop' },
+    ]
+    const error = await failure(events)
+    expect(error.code).toBe('CONTEXT_WINDOW_EXCEEDED')
+    expect(error.message).toMatch(/context window/u)
+  })
+
+  it('keeps a whole block the start event stated, and streams it as the first delta', async () => {
+    // A gateway that reports a complete block at content_block_start and sends
+    // no deltas must not lose the payload (nor report an EMPTY_RESPONSE).
+    const events = [
+      messageStart(),
+      { type: 'content_block_start', index: 0, content_block: { type: 'text', text: 'whole answer' } },
+      { type: 'content_block_stop', index: 0 },
+      messageDelta('end_turn', { output_tokens: 2 }),
+      { type: 'message_stop' },
+    ]
+    const chunks = await translate(events)
+    expect(chunks).toEqual([
+      { type: 'block-start', index: 0, blockType: 'text' },
+      { type: 'text-delta', index: 0, text: 'whole answer' },
+      { type: 'block-end', index: 0, block: { type: 'text', text: 'whole answer' } },
+      { type: 'usage', usage: { inputTokens: 7, outputTokens: 2, totalTokens: 9, cacheReadTokens: 0, cacheWriteTokens: 0 } },
+      expect.objectContaining({ type: 'finish', reason: { kind: 'stop' } }),
+    ])
+  })
+
+  it('replays a thinking signature the start event supplied', async () => {
+    const events = [
+      messageStart(),
+      { type: 'content_block_start', index: 0, content_block: { type: 'thinking', thinking: 'weighing', signature: 'sig-start' } },
+      { type: 'content_block_stop', index: 0 },
+      messageDelta('end_turn', { output_tokens: 1 }),
+      { type: 'message_stop' },
+    ]
+    const finish = (await translate(events)).at(-1)
+    if (finish?.type !== 'finish') throw new Error('the stream did not finish')
+    expect(finish.replayState?.blocks).toEqual([{ type: 'reasoning', signature: 'sig-start' }])
+  })
+
+  it('carries a whole tool input stated at block start, and {} for a no-argument call', async () => {
+    const started = [
+      messageStart(),
+      { type: 'content_block_start', index: 0, content_block: { type: 'tool_use', id: 'toolu_a', name: 'shell', input: { cmd: 'ls' } } },
+      { type: 'content_block_stop', index: 0 },
+      messageDelta('tool_use', { output_tokens: 3 }),
+      { type: 'message_stop' },
+    ]
+    const chunks = await translate(started)
+    // The call is announced without arguments: fragments are authoritative, and
+    // a gateway that streams none leaves the start event's input as the value
+    // the authoritative block-end carries.
+    expect(chunks).toContainEqual({
+      type: 'tool-call-delta', index: 0, id: 'toolu_a', name: 'shell', argumentsDelta: '',
+    })
+    expect(chunks).toContainEqual({
+      type: 'block-end', index: 0, block: { type: 'tool-call', id: 'toolu_a', name: 'shell', arguments: '{"cmd":"ls"}' },
+    })
+    // An empty initial input plus no fragments is the protocol's no-argument
+    // call; the harness contract keeps tool arguments as raw JSON, never ''.
+    const empty = await translate([
+      messageStart(),
+      { type: 'content_block_start', index: 0, content_block: { type: 'tool_use', id: 'toolu_b', name: 'shell', input: {} } },
+      { type: 'content_block_stop', index: 0 },
+      messageDelta('tool_use', { output_tokens: 3 }),
+      { type: 'message_stop' },
+    ])
+    expect(empty).toContainEqual({
+      type: 'block-end', index: 0, block: { type: 'tool-call', id: 'toolu_b', name: 'shell', arguments: '{}' },
+    })
+  })
+
+  it('lets streamed argument fragments win over an initial input the start event also stated', async () => {
+    // Spec-conforming streams start with `input: {}` and stream fragments.
+    // A gateway that also seeds a partial object at start must not have its
+    // fragments silently dropped: fragments are the protocol's own form.
+    const events = [
+      messageStart(),
+      { type: 'content_block_start', index: 0, content_block: { type: 'tool_use', id: 'toolu_m', name: 'shell', input: { a: 1 } } },
+      { type: 'content_block_delta', index: 0, delta: { type: 'input_json_delta', partial_json: '{"b":2}' } },
+      { type: 'content_block_stop', index: 0 },
+      messageDelta('tool_use', { output_tokens: 3 }),
+      { type: 'message_stop' },
+    ]
+    expect(await translate(events)).toContainEqual({
+      type: 'block-end', index: 0, block: { type: 'tool-call', id: 'toolu_m', name: 'shell', arguments: '{"b":2}' },
+    })
   })
 
   it('refuses a stream that ended without a stop reason', async () => {

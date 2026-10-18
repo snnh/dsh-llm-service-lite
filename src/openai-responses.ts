@@ -293,6 +293,7 @@ function reasoningItems(
   replayed: readonly ResponsesReplayBlock[] | undefined,
   plainText: boolean,
   encrypted: boolean,
+  sameSource: boolean,
 ): ResponsesReasoningItem[] {
   const items: ResponsesReasoningItem[] = []
   for (const [position, block] of message.content.entries()) {
@@ -306,8 +307,11 @@ function reasoningItems(
       }
     }
     // The plain-text form is what a thinking-mode endpoint accepts when there
-    // is no encrypted payload to hand back.
-    if (plainText && block.text.length > 0) items.push(reasoningTextItem(block.text))
+    // is no encrypted payload to hand back. Like the chat-completions wire
+    // (and OWC), only reasoning this same provider/model produced is handed
+    // back: another adapter's thinking is not this endpoint's reasoning, and
+    // thinking-mode endpoints validate the items they receive.
+    if (plainText && sameSource && block.text.length > 0) items.push(reasoningTextItem(block.text))
   }
   return items
 }
@@ -351,7 +355,8 @@ export function toResponsesInput(
     }
     if (message.role === 'tool') continue
     const replayed = replayBlocksOf(message, provider, model.id)
-    out.push(...reasoningItems(message, replayed, model.reasoningContent, model.encryptedReplay))
+    const sameSource = message.source.provider === provider && message.source.model === model.id
+    out.push(...reasoningItems(message, replayed, model.reasoningContent, model.encryptedReplay, sameSource))
     const text = textOf(message)
     if (text.length > 0) {
       const itemId = replayed?.find(entry => entry.type === 'text')?.itemId

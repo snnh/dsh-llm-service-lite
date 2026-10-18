@@ -144,6 +144,18 @@ function finishReasonOf(
   return undefined
 }
 
+/** The encrypted reasoning payload one serialized item carries, when it has one. */
+function encryptedPayloadOf(serialized: string): string | undefined {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(serialized)
+  } catch (_unreadableReplayItem) {
+    return undefined
+  }
+  const encrypted = asRecord(parsed)['encrypted_content']
+  return typeof encrypted === 'string' && encrypted.length > 0 ? encrypted : undefined
+}
+
 /**
  * Translate one Responses event stream into harness chunks.
  *
@@ -190,6 +202,13 @@ export async function* translateResponsesStream(
   /** Image items already written, so a terminal event does not repeat one. */
   const writtenImages = new Set<string>()
   /**
+   * Summary parts whose paragraph separator is owed to a following part.
+   * Emitting it at `part.done` would leave the block's last part with a
+   * trailing blank line, because the closing item's authoritative text is the
+   * summaries joined without one.
+   */
+  const pendingSeparators = new Set<string>()
+  /**
    * Chunks one image-generation item contributes: this protocol returns the
    * finished picture inside the item, so the image is one whole block rather
    * than a stream of fragments.
@@ -225,12 +244,24 @@ export async function* translateResponsesStream(
   /**
    * Keep the provider's own reasoning item with its block, which is what a
    * model declaring encrypted replay hands back verbatim on the next request.
+   *
+   * The newest copy usually wins — the terminal event is authoritative — but a
+   * copy that lost the payload an earlier copy carried must not replace it:
+   * Azure-style endpoints repeat a reasoning item in `response.completed`
+   * without its `encrypted_content`, and that payload is exactly what a
+   * stateless follow-up turn needs.
    */
   const keepItem = (slot: Slot, item: Record<string, unknown>): void => {
     const id = asText(item['id'])
     if (slot.entry.type !== 'reasoning' || item['type'] !== 'reasoning') return
     if (id === undefined || id.length === 0) return
-    slot.entry.item = JSON.stringify(item)
+    const next = JSON.stringify(item)
+    if (slot.entry.item !== undefined
+      && encryptedPayloadOf(slot.entry.item) !== undefined
+      && encryptedPayloadOf(next) === undefined) {
+      return
+    }
+    slot.entry.item = next
   }
 
   /**
@@ -356,21 +387,31 @@ export async function* translateResponsesStream(
       const delta = asText(event['delta'])
       if (delta === undefined || delta.length === 0) continue
       const outputIndex = event['output_index']
-      const { slot, started } = ensure(`reasoning:${String(outputIndex)}`, 'reasoning')
+      const key = `reasoning:${String(outputIndex)}`
+      const { slot, started } = ensure(key, 'reasoning')
       if (typeof outputIndex === 'number') identify(slot, itemIdByIndex.get(outputIndex))
       sawOutput = true
       if (started) yield announce(slot)
+      // A separator the provider's part.done owed is emitted only now that a
+      // following part actually carries text, so the block never ends on one.
+      if (pendingSeparators.delete(key)) {
+        slot.text += '\n\n'
+        yield { type: 'reasoning-delta', index: slot.index, text: '\n\n' }
+      }
       slot.text += delta
       yield { type: 'reasoning-delta', index: slot.index, text: delta }
       continue
     }
     if (type === 'response.reasoning_summary_part.done') {
       // The provider separates summary parts; a blank line is what keeps two
-      // paragraphs from reading as one sentence.
-      const slot = slots.get(`reasoning:${String(event['output_index'])}`)
-      if (slot === undefined) continue
-      slot.text += '\n\n'
-      yield { type: 'reasoning-delta', index: slot.index, text: '\n\n' }
+      // paragraphs from reading as one sentence. The separator is deferred to
+      // the next part's first delta: emitting it here would leave a trailing
+      // blank line after the final part, which the closing item's authoritative
+      // text (the summaries joined, no trailing separator) does not carry.
+      const key = `reasoning:${String(event['output_index'])}`
+      const slot = slots.get(key)
+      if (slot === undefined || slot.text.length === 0) continue
+      pendingSeparators.add(key)
       continue
     }
     if (type === 'response.function_call_arguments.delta') {
@@ -442,9 +483,14 @@ export async function* translateResponsesStream(
           continue
         }
         if (record['type'] === 'message' || record['type'] === 'reasoning') {
-          // An item the stream already carried is skipped: its block exists.
-          if (itemId !== undefined && byItemId.has(itemId)) continue
           const kind = record['type'] === 'message' ? 'text' : 'reasoning'
+          // The terminal event is the authoritative last chance for an item the
+          // stream never closed. Azure-style endpoints report a reasoning item
+          // only here — with its encrypted payload — so the replay entry is
+          // backfilled even when the block itself already closed. writeItem
+          // stays idempotent (a closed block is left untouched).
+          const known = itemId === undefined ? undefined : byItemId.get(itemId)
+          if (known !== undefined) keepItem(known, record)
           const key = typeof outputIndex === 'number' ? `${kind}:${String(outputIndex)}` : undefined
           for (const chunk of writeItem(record, kind, key, itemId)) yield chunk
         }

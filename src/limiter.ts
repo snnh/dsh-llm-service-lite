@@ -31,21 +31,36 @@ function abortedWhileQueueing(): LlmError {
   return new LlmError('llm-service-lite: request aborted while queueing', 'ABORTED')
 }
 
+/** Validate one admission ceiling. */
+function assertLimit(maxConcurrent: number): void {
+  if (!Number.isSafeInteger(maxConcurrent) || maxConcurrent < 1) {
+    throw new Error(`ConcurrencyLimiter maxConcurrent must be a positive safe integer, received ${String(maxConcurrent)}`)
+  }
+}
+
 /**
- * A FIFO admission queue with a fixed number of slots.
+ * A FIFO admission queue with a tunable number of slots.
  *
  * A released slot is handed to the next waiter rather than returned to a pool,
  * so a request that arrives between a release and the handoff cannot overtake
- * one that has been waiting.
+ * one that has been waiting. The ceiling is tunable in place: a configuration
+ * edit that changes a route's concurrency must keep this one queue, both so
+ * waiting requests are never split between two limiter instances and so the
+ * new ceiling is the only ceiling admission can use from then on. Requests
+ * already running are never preempted.
  */
 export class ConcurrencyLimiter {
   private active = 0
+  private limit: number
   private readonly waiters: Waiter[] = []
 
   /**
    * @param maxConcurrent - slots this limiter grants before queueing.
    */
-  constructor(private readonly maxConcurrent: number) {}
+  constructor(maxConcurrent: number) {
+    assertLimit(maxConcurrent)
+    this.limit = maxConcurrent
+  }
 
   /** Requests currently holding a slot. */
   get running(): number {
@@ -57,6 +72,26 @@ export class ConcurrencyLimiter {
     return this.waiters.length
   }
 
+  /** Slots this limiter currently grants before queueing. */
+  get maxConcurrent(): number {
+    return this.limit
+  }
+
+  /**
+   * Re-tune the admission ceiling in place.
+   *
+   * A raised ceiling admits queued requests immediately; a lowered one stops
+   * further admissions until running requests drop below it, without
+   * interrupting any request that already holds a slot.
+   * @param maxConcurrent - the next positive number of slots.
+   */
+  setMaxConcurrent(maxConcurrent: number): void {
+    assertLimit(maxConcurrent)
+    if (maxConcurrent === this.limit) return
+    this.limit = maxConcurrent
+    this.pump()
+  }
+
   /**
    * Acquire one slot, waiting in FIFO order when all are held.
    * @param signal - cancellation for the wait; an already-aborted signal never queues.
@@ -64,7 +99,7 @@ export class ConcurrencyLimiter {
    */
   acquire(signal?: AbortSignal): Promise<Lease> {
     if (signal?.aborted === true) return Promise.reject(abortedWhileQueueing())
-    if (this.active < this.maxConcurrent && this.waiters.length === 0) {
+    if (this.active < this.limit && this.waiters.length === 0) {
       this.active += 1
       return Promise.resolve(this.lease())
     }
@@ -99,7 +134,7 @@ export class ConcurrencyLimiter {
 
   /** Admit queued requests while slots remain, skipping ones that were cancelled. */
   private pump(): void {
-    while (this.active < this.maxConcurrent && this.waiters.length > 0) {
+    while (this.active < this.limit && this.waiters.length > 0) {
       const waiter = this.waiters.shift()
       if (waiter === undefined) return
       waiter.signal?.removeEventListener('abort', waiter.onAbort)

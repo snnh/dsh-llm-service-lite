@@ -22,13 +22,13 @@ import type {
   StreamChunk,
 } from '@deepseek-ai/dsh-llm'
 import { idleWatchdog, timeoutOf } from '@deepseek-ai/dsh-timeout'
-import type { AttachmentStore } from '@deepseek-ai/dsh-attachment'
+import type { AttachmentStore, ImageAttachmentRef, ImageRequestTarget } from '@deepseek-ai/dsh-attachment'
 import { anthropicRequest } from './anthropic-messages.ts'
 import { translateAnthropicStream } from './anthropic-stream.ts'
 import { chatRequest, translateChatStream } from './chat-completions.ts'
 import { responsesRequest } from './openai-responses.ts'
 import { translateResponsesStream } from './responses-stream.ts'
-import { imageRequestPricing, prepareRequestImages } from './images.ts'
+import { imageRequestPricing, prepareRequestImages, requestImageTarget } from './images.ts'
 import { generatedImageBlock, isGeneratedImage, type AdapterChunk } from './image-output.ts'
 import { classifyFailure, classifyTransport } from './errors.ts'
 import { ConcurrencyLimiter } from './limiter.ts'
@@ -118,6 +118,23 @@ export class OwcProfilesAdapter extends LlmAdapter {
     return imageRequestPricing(modelOf(profile, model))
   }
 
+  /**
+   * Report the exact request-image projection this adapter serializes: the
+   * route's declared pixel budget, the adapter's long-edge cap, and the model's
+   * encoded-byte target.
+   *
+   * The seam asks synchronously and without I/O, and its consumers include the
+   * CUA screenshot pipeline, which derives the coordinate space it maps model
+   * input back into from this answer. Reporting the normalized image instead
+   * (the base-class default) would describe a projection the endpoint never
+   * receives, so the dimensions a model reasons about and the dimensions it is
+   * sent would disagree.
+   */
+  override imageRequestTarget(provider: string, model: string, image: ImageAttachmentRef): ImageRequestTarget {
+    const profile = requireProfile(this.dependencies.profiles(), provider)
+    return requestImageTarget(modelOf(profile, model), image)
+  }
+
   override resolveModel(provider: string, model: string, _signal?: AbortSignal): Promise<LlmResolvedModelInfo> {
     // The refusal is a rejection rather than a synchronous throw: a route a
     // configuration no longer declares fails the caller's promise, which is
@@ -176,11 +193,12 @@ export class OwcProfilesAdapter extends LlmAdapter {
       lease?.release()
       consumer.abort()
       if (iterator !== undefined) {
-        try {
-          await iterator.return(undefined)
-        } catch (_abortedRequestCleanup) {
-          // The request already settled; aborting its reader cannot replace that outcome.
-        }
+        // The abort above owns socket teardown. A demand the idle watchdog
+        // abandoned can stay pending forever (a transport may drop the error of
+        // an aborted in-flight body read), and this generator queues its own
+        // return behind that demand, so awaiting the drain would re-hang a
+        // settled outcome. Detach it, exactly as the first-party adapters do.
+        void iterator.return(undefined).catch(() => {})
       }
     }
   }

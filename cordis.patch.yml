@@ -5,11 +5,25 @@
 # dormant, holding no route until a profile declares an endpoint, so a harness
 # can carry the row before any provider is configured.
 #
-# Configure it by overriding this row in the profile's own cordis.patch.yml —
-# that layer is applied after every bundle layer, so its `config` replaces the
-# `providers` dictionary here. Mount it exactly once: a second row with the same
-# id mounts a second instance that claims the same settings namespace, which
-# fails plugin loading.
+# Configure it in the web UI: Plugins -> this bundle -> the llm-service-lite row
+# -> Configure. The page edits this row's own `config` (providers, models,
+# credentials, endpoint model discovery), so a save is the document the Host
+# already loads. The same dictionary can be written by hand under this row's
+# `config` in the profile's cordis.patch.yml ($DSH_HOME/profiles/<profile>/cordis.patch.yml;
+# Settings -> Open configuration file). That layer is applied after every bundle
+# layer, so its `config` replaces the row's empty default. Upstream 0.2.1-rc.2's
+# Models page does not lay out this adapter's namespace, so the plugin page and
+# the profile patch are the supported configuration surfaces; hand-written fields
+# the page does not render are preserved by every save.
+#
+# Keep exactly one layer for this row: a later layer's same-id insert replaces
+# this row and its whole `config` — patch layers never deep-merge — so a second
+# row silently discards what the first configured; it does not mount a second
+# instance.
+#
+# Route names must be unique across the mounted adapters: stock upstream profiles
+# ship the llm-pi-ai catalog, which already declares common names (deepseek,
+# openai, ...), so prefer a distinct route id such as `deepseek-direct`.
 - insert:
     - id: llm-service-lite
       name: '@snnh/dsh-llm-service-lite'

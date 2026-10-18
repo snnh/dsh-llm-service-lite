@@ -23,6 +23,24 @@ import {
 const REQUEST_ID_HEADERS = ['request-id', 'x-request-id', 'x-deepseek-request-id'] as const
 
 /**
+ * Provider wordings the shared harness classifiers do not cover.
+ *
+ * The harness's `isContextWindowExceededError` deliberately matches the
+ * provider-neutral phrasings ("maximum context length", "too long for this
+ * model/context"). Anthropic spells the same condition as
+ * `prompt is too long: 208310 tokens > 200000 maximum` and its request
+ * byte-size limit as `request_too_large`; neither contains the word
+ * "context". The harness's own Anthropic-capable adapter recognises both
+ * (pi-ai `utils/overflow`), so missing them here would leave the compaction
+ * recovery path unreachable on a Messages route.
+ */
+const PROVIDER_CONTEXT_OVERFLOW =
+  /prompt (?:is )?too long|request_too_large|input is too long for (?:the )?requested model/iu
+
+/** Anthropic spells an exhausted account balance this way; the shared quota patterns do not. */
+const PROVIDER_QUOTA_EXHAUSTED = /credit balance is too low/iu
+
+/**
  * Joined provider error code, type, and message text used by the classifiers.
  * @param raw - the provider's error body or error object, as received.
  * @returns the distinct non-empty text parts, joined by one space.
@@ -101,8 +119,12 @@ export function classifyFailure(raw: unknown, status: number | undefined, header
   const message = errorMessage(raw, status)
   const facts = providerFacts(status, headers)
   if (status === 401 || status === 403) return new LlmError(message, 'AUTH', facts)
-  if (isQuotaExceededError(detail) || status === 402) return new LlmError(message, 'QUOTA', facts)
-  if (isContextWindowExceededError(detail)) return new LlmError(message, 'CONTEXT_WINDOW_EXCEEDED', facts)
+  if (isQuotaExceededError(detail) || PROVIDER_QUOTA_EXHAUSTED.test(detail) || status === 402) {
+    return new LlmError(message, 'QUOTA', facts)
+  }
+  if (isContextWindowExceededError(detail) || PROVIDER_CONTEXT_OVERFLOW.test(detail)) {
+    return new LlmError(message, 'CONTEXT_WINDOW_EXCEEDED', facts)
+  }
   if (status === 408 || status === 502 || status === 504) return new LlmError(message, 'TRANSPORT', facts)
   if (status === 429) return new LlmError(message, 'RATE_LIMIT', facts)
   if (status === 529 || (status !== undefined && status >= 500)) return new LlmError(message, 'SERVER', facts)

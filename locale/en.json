@@ -1,6 +1,6 @@
 {
   "meta": {
     "title": "LLM Service Lite",
-    "description": "Serves the model routes your provider profiles declare over the chat-completions, Anthropic Messages, and OpenAI Responses wires."
+    "description": "Serves the model routes your provider profiles declare over the chat-completions, Anthropic Messages, and OpenAI Responses wires, with a provider-configuration page on the Plugins screen."
   }
 }

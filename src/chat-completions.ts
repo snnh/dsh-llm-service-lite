@@ -17,7 +17,7 @@
  */
 
 import { attributionHeaders, LlmError, ToolCallId } from '@deepseek-ai/dsh-llm'
-import type { ContentBlock, FinishReason, GenerateOptions, RequestMessage, StreamChunk, TokenUsage } from '@deepseek-ai/dsh-llm'
+import type { ContentBlock, FinishReason, GenerateOptions, ImageBlock, RequestMessage, StreamChunk, TokenUsage } from '@deepseek-ai/dsh-llm'
 import type { RequestImageAttachment } from '@deepseek-ai/dsh-attachment'
 import { imageDataUrl, offloadedImageText } from './images.ts'
 import { decodeGeneratedImage, type AdapterChunk } from './image-output.ts'
@@ -146,14 +146,56 @@ function thinkingSwitch(model: ResolvedOwcModel, thinking: boolean | undefined):
  * whose result never landed with a placeholder.
  */
 function toolPairings(messages: readonly RequestMessage[]): {
-  results: Map<string, { text: string; isError: boolean }>
+  results: Map<string, { text: string; isError: boolean; media: readonly ImageBlock[] }>
 } {
-  const results = new Map<string, { text: string; isError: boolean }>()
+  const results = new Map<string, { text: string; isError: boolean; media: readonly ImageBlock[] }>()
   for (const message of messages) {
     if (message.role !== 'tool') continue
-    results.set(String(message.toolCallId), { text: textOf(message), isError: message.isError === true })
+    results.set(String(message.toolCallId), {
+      text: textOf(message),
+      isError: message.isError === true,
+      // A tool result may carry images beside its text (the harness's own
+      // `read_image` returns one). This protocol has no image part inside a
+      // tool message, so they follow the batch as one synthetic user turn.
+      media: message.content.flatMap(block => block.type === 'image' ? [block] : []),
+    })
   }
   return { results }
+}
+
+/** The text envelope one synthetic media turn leads with, matching this plugin's other wires. */
+const TOOL_MEDIA_NOTE = 'Attached media from tool result:'
+
+/**
+ * The one user turn that carries the media a batch of tool results produced.
+ * This protocol's tool message holds text only, so the pictures follow the
+ * batch; without this the model is told it read an image it never receives.
+ * @param media - image occurrences the batch's results carried, in call order.
+ * @param versions - prepared request image versions, keyed by durable attachment id.
+ * @returns the user message, or undefined when the batch carried no media.
+ * @throws LlmError `INVALID_CONFIG` when a retained occurrence has no prepared version.
+ */
+function toolMediaMessage(
+  media: readonly ImageBlock[],
+  versions: ReadonlyMap<string, RequestImageAttachment>,
+): WireMessage | undefined {
+  if (media.length === 0) return undefined
+  const parts: WireContentPart[] = [{ type: 'text', text: TOOL_MEDIA_NOTE }]
+  for (const block of media) {
+    if (block.offloaded === true) {
+      parts.push({ type: 'text', text: offloadedImageText(block) })
+      continue
+    }
+    const version = versions.get(block.attachment.attachmentId)
+    if (version === undefined) {
+      throw new LlmError(
+        'llm-service-lite: a retained image occurrence reached the wire without a prepared request version',
+        'INVALID_CONFIG',
+      )
+    }
+    parts.push({ type: 'image_url', image_url: { url: imageDataUrl(version) } })
+  }
+  return { role: 'user', content: parts }
 }
 
 /**
@@ -238,6 +280,7 @@ export function toWireMessages(
           ...replay && reasoning.length > 0 ? { reasoning_content: reasoning } : {},
         }
         out.push(wire)
+        const media: ImageBlock[] = []
         for (const call of calls) {
           emittedCalls.add(String(call.id))
           const result = results.get(String(call.id))
@@ -248,7 +291,12 @@ export function toWireMessages(
             tool_call_id: String(call.id),
             content: result?.text ?? 'Tool result missing: this call did not complete.',
           })
+          media.push(...result?.media ?? [])
         }
+        // The batch's pictures follow its tool messages as one user turn; an
+        // image cannot ride a tool message in this protocol.
+        const attached = toolMediaMessage(media, versions)
+        if (attached !== undefined) out.push(attached)
         break
       }
       // Results are inlined with their calls above; a standalone one is an
@@ -342,14 +390,21 @@ function usageOf(chunk: WireChunk): TokenUsage | undefined {
   if (usage === undefined || typeof usage.prompt_tokens !== 'number' || typeof usage.completion_tokens !== 'number') {
     return undefined
   }
+  const prompt = usage.prompt_tokens
+  const completion = usage.completion_tokens
+  // The harness contract counts tokens, so an unusable count is a malformed
+  // report rather than a number to pass on to the session's accounting.
+  if (!Number.isSafeInteger(prompt) || prompt < 0 || !Number.isSafeInteger(completion) || completion < 0) {
+    throw new LlmError('llm-service-lite: provider returned invalid token usage', 'MALFORMED_RESPONSE')
+  }
   const cached = usage.prompt_tokens_details?.cached_tokens ?? 0
-  if (!Number.isSafeInteger(cached) || cached < 0 || cached > usage.prompt_tokens) {
+  if (!Number.isSafeInteger(cached) || cached < 0 || cached > prompt) {
     throw new LlmError('llm-service-lite: provider returned invalid cached token usage', 'MALFORMED_RESPONSE')
   }
   return {
-    inputTokens: usage.prompt_tokens - cached,
-    outputTokens: usage.completion_tokens,
-    totalTokens: usage.prompt_tokens + usage.completion_tokens,
+    inputTokens: prompt - cached,
+    outputTokens: completion,
+    totalTokens: prompt + completion,
     cacheReadTokens: cached,
     cacheWriteTokens: 0,
   }
@@ -495,10 +550,18 @@ export async function* translateChatStream(
   }
   const hasToolCalls = calls.length > 0
   const finish = finishReasonOf(stopReason, sawDone(), sawOutput, hasToolCalls)
+  if (!sawOutput) {
+    // A clean sentinel or an explicit stop reason over no content is the
+    // degenerate completion the harness names EMPTY_RESPONSE; without either
+    // the connection was cut off and that is a transport failure.
+    if (!sawDone() && stopReason === undefined) {
+      throw new LlmError('llm-service-lite: chat-completions stream ended before a terminal event', 'TRANSPORT')
+    }
+    throw new LlmError('llm-service-lite: chat-completions response carried no content', 'EMPTY_RESPONSE')
+  }
   if (finish === undefined) {
     throw new LlmError('llm-service-lite: chat-completions stream ended before a terminal event', 'TRANSPORT')
   }
-  if (!sawOutput) throw new LlmError('llm-service-lite: chat-completions response carried no content', 'EMPTY_RESPONSE')
   if (pendingUsage !== undefined) yield { type: 'usage', usage: pendingUsage }
   yield { type: 'finish', reason: finish }
 }

@@ -1,6 +1,6 @@
 {
   "meta": {
     "title": "LLM 服务（轻量版）",
-    "description": "按你声明的服务商档案提供模型路由，走 chat-completions、Anthropic Messages 与 OpenAI Responses 三条线协议。"
+    "description": "按你声明的服务商档案提供模型路由，走 chat-completions、Anthropic Messages 与 OpenAI Responses 三条线协议；在 Plugins 页提供服务商配置界面。"
   }
 }

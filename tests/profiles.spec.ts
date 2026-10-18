@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { Config } from '../src/config.ts'
+import { Config, DEFAULT_CONTEXT_WINDOW, DEFAULT_MAX_TOKENS } from '../src/config.ts'
 import { assertServiceable, modelOf, registrationFacts, resolveProfiles, serviceableRoutes } from '../src/profiles.ts'
 import type { Options } from '../src/config.ts'
 
@@ -46,6 +46,15 @@ const refusedCatalog = (profile: Record<string, unknown>): string => {
   }
   throw new Error('the profile was accepted')
 }
+
+describe('profile schema', () => {
+  it('bounds the concurrency ceiling to what the admission limiter accepts', () => {
+    expect(() => configured({ maxConcurrent: 0 })).toThrow()
+    expect(() => configured({ maxConcurrent: 1.5 })).toThrow()
+    expect(() => configured({ maxConcurrent: Number.MAX_SAFE_INTEGER + 1 })).toThrow()
+    expect(configured({ maxConcurrent: 4 })?.['gateway']?.maxConcurrent).toBe(4)
+  })
+})
 
 describe('profile resolution', () => {
   it('materializes route and model defaults', () => {
@@ -498,5 +507,136 @@ describe('profile validation', () => {
     expect(() => { assertServiceable({ providers: { ...previous.providers } }, previous) }).not.toThrow()
     expect(() => { assertServiceable({ providers: { ...previous.providers, added: { interfaceType: 'openai-chat-completions', baseURL: 'https://ok.test' } } }, previous) }).not.toThrow()
     expect(() => { assertServiceable({ providers: { ...previous.providers, changed: { interfaceType: 'openai-chat-completions', baseURL: '' } } }, previous) }).toThrow(/empty baseURL/)
+  })
+})
+
+describe('catalog conversion validation', () => {
+  it('drops converted values the model contract would reject and reports each one', () => {
+    const profile = resolveProfiles({
+      gateway: {
+        catalog: {
+          'openai-completions': {
+            'chat:m': {
+              id: 'm',
+              api: 'openai-completions',
+              contextWindow: 4096.5,
+              maxTokens: 0,
+              headers: { 'x-tenant': 7 },
+            },
+          },
+        },
+      },
+    }).get('gateway')
+    // The route still serves; only the values no request could carry are gone.
+    expect(profile?.diagnostic).toBeUndefined()
+    expect(profile?.headers).toEqual({})
+    expect(profile?.models[0]?.contextWindow).toBe(DEFAULT_CONTEXT_WINDOW)
+    expect(profile?.models[0]?.maxTokens).toBe(DEFAULT_MAX_TOKENS)
+    expect(profile?.catalogDiagnostics).toEqual([
+      'llm-service-lite: provider "gateway" catalog header "x-tenant" is not a string; the route declares no catalog headers',
+      'llm-service-lite: provider "gateway" catalog model "m" contextWindow "4096.5" is not a positive integer; the capacity is not carried',
+      'llm-service-lite: provider "gateway" catalog model "m" maxTokens "0" is not a positive integer; the capacity is not carried',
+    ])
+  })
+
+  it('drops request defaults outside the schema bounds and top-k on a protocol without one', () => {
+    const chat = resolveProfiles({
+      gateway: {
+        catalog: {
+          'openai-completions': {
+            'chat:m': {
+              id: 'm',
+              api: 'openai-completions',
+              samplingParams: { temperature: 99, top_p: 0.5, top_k: 2.5 },
+            },
+          },
+        },
+      },
+    }).get('gateway')
+    expect(chat?.diagnostic).toBeUndefined()
+    expect(chat?.models[0]?.defaults).toMatchObject({ topP: 0.5 })
+    expect(chat?.models[0]?.defaults.temperature).toBeUndefined()
+    expect(chat?.models[0]?.defaults.topK).toBeUndefined()
+    expect(chat?.catalogDiagnostics.join('\n')).toMatch(/defaults\.temperature/)
+    expect(chat?.catalogDiagnostics.join('\n')).toMatch(/defaults\.topK/)
+    // top-k on the Responses protocol used to make the whole route unserviceable
+    // in resolution; the conversion now drops and reports it instead.
+    const responses = resolveProfiles({
+      gateway: {
+        catalog: {
+          'openai-responses': {
+            'chat:m': { id: 'm', api: 'openai-responses', samplingParams: { top_k: 40 } },
+          },
+        },
+      },
+    }).get('gateway')
+    expect(responses?.diagnostic).toBeUndefined()
+    expect(responses?.models[0]?.defaults).toMatchObject({
+      temperature: undefined,
+      topP: undefined,
+      topK: undefined,
+      maxTokens: undefined,
+    })
+    expect(responses?.catalogDiagnostics.join('\n')).toMatch(/not carried on interfaceType "openai-responses"/)
+    // A profile that overrides the catalog's protocol is validated against the
+    // protocol the route actually becomes, so a response route never inherits top-k.
+    const overridden = resolveProfiles({
+      gateway: {
+        catalog: {
+          'openai-completions': {
+            'chat:m': { id: 'm', api: 'openai-completions', samplingParams: { top_k: 40 } },
+          },
+        },
+        interfaceType: 'openai-responses',
+      },
+    }).get('gateway')
+    expect(overridden?.diagnostic).toBeUndefined()
+    expect(overridden?.models[0]?.defaults.topK).toBeUndefined()
+    expect(overridden?.catalogDiagnostics.join('\n')).toMatch(/not carried on interfaceType "openai-responses"/)
+  })
+
+  it('keeps a valid converted catalog free of drop diagnostics', () => {
+    const profile = resolveProfiles({
+      gateway: {
+        catalog: {
+          'openai-completions': {
+            'chat:m': { id: 'm', api: 'openai-completions', contextWindow: 4096, maxTokens: 512 },
+          },
+        },
+      },
+    }).get('gateway')
+    expect(profile?.catalogDiagnostics).toEqual([])
+    expect(profile?.models[0]).toMatchObject({ id: 'm', contextWindow: 4096, maxTokens: 512 })
+  })
+})
+
+describe('disabling a stored route', () => {
+  it('lets a write disable an unserviceable profile while enabled and new claims stay strict', () => {
+    const previous: Options = {
+      providers: { stored: { interfaceType: 'openai-chat-completions', baseURL: 'not a url' } },
+    }
+    // Unchanged already passed; disabling the broken stored profile is the repair
+    // path and must be writable.
+    expect(() => assertServiceable({ providers: { ...previous.providers } }, previous)).not.toThrow()
+    expect(() => assertServiceable({
+      providers: { stored: { interfaceType: 'openai-chat-completions', baseURL: 'not a url', enabled: false } },
+    }, previous)).not.toThrow()
+    // Shrinking the document — removing the route entirely — is accepted.
+    expect(() => assertServiceable({ providers: {} }, previous)).not.toThrow()
+    // A rename to a valid route is the other repair and is validated as a new claim.
+    expect(() => assertServiceable({
+      providers: { renamed: { interfaceType: 'openai-chat-completions', baseURL: 'https://ok.test/v1' } },
+    }, previous)).not.toThrow()
+    // An enabled claim that cannot serve is still refused, new or changed.
+    expect(() => assertServiceable({
+      providers: { ...previous.providers, added: { interfaceType: 'openai-chat-completions', baseURL: '' } },
+    }, previous)).toThrow(/empty baseURL/)
+    expect(() => assertServiceable({
+      providers: { stored: { interfaceType: 'openai-chat-completions', baseURL: '' } },
+    }, previous)).toThrow(/empty baseURL/)
+    // A newly added profile that is parked (disabled) serves nothing and is accepted.
+    expect(() => assertServiceable({
+      providers: { ...previous.providers, parked: { baseURL: '', enabled: false } },
+    }, previous)).not.toThrow()
   })
 })
