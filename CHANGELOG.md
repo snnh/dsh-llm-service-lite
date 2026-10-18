@@ -4,10 +4,11 @@ All notable changes to `@snnh/dsh-llm-service-lite`. The package follows the
 harness line it is built against: `peerDependencies` name that line, while this
 package's own patch releases are independent.
 
-## Unreleased
+## 0.1.1 — 2026-10-18
 
-Verified against DeepSeek Harness `0.2.1-rc.2` (tests: 19 files / 357 cases).
-Not published yet; the published release remains `0.1.0`.
+Verified against DeepSeek Harness `0.2.1-rc.2` (published tests: 22 files /
+414 cases). The first release to ship the browser half alongside the Host
+plugin.
 
 ### Fixed
 
