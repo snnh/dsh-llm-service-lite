@@ -6,15 +6,32 @@
  * @module @snnh/dsh-llm-service-lite/client/ProviderFields
  */
 
-import { useEffect, useId, useState, type ReactNode } from 'react'
+import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
 import type { ServiceLiteKey } from './locales.ts'
-import type { ServiceLiteTranslate } from './types.ts'
-import { deriveKeyRef } from './model.ts'
-import type { ClientProvider, InterfaceType, ProviderPatch } from './types.ts'
-import { ActionButton, Field, FieldGroup, IntegerField, SelectField, TextInput, Toggle, styles } from './ui.tsx'
+import { deriveKeyRef, extraBodyFailure, parseExtraBody, spellExtraBody } from './model.ts'
+import type {
+  ClientProvider,
+  DiscoveryOutcome,
+  DiscoveryRequest,
+  InterfaceType,
+  ProviderPatch,
+  ServiceLiteTranslate,
+} from './types.ts'
+import {
+  ActionButton,
+  Chip,
+  Field,
+  IntegerField,
+  PageStyle,
+  SectionCard,
+  SelectField,
+  TextInput,
+  Toggle,
+  styles,
+} from './ui.tsx'
 
 /** The protocol choices this page offers. */
-const PROTOCOL_OPTIONS: readonly { value: InterfaceType; label: ServiceLiteKey }[] = [
+export const PROTOCOL_OPTIONS: readonly { value: InterfaceType; label: ServiceLiteKey }[] = [
   { value: 'openai-chat-completions', label: 'protocolChat' },
   { value: 'anthropic-messages', label: 'protocolAnthropic' },
   { value: 'openai-responses', label: 'protocolResponses' },
@@ -34,7 +51,18 @@ export interface ProviderFieldsProps {
   readonly onPatch: (patch: ProviderPatch) => void
   /** Store one credential literal; resolves to the refusal message. */
   readonly onStoreKey: (ref: string, value: string) => Promise<string | undefined>
+  /** Ask the route's endpoint for its models, for the connection test. */
+  readonly onDiscover?: ((request: DiscoveryRequest) => Promise<DiscoveryOutcome>) | undefined
+  /** Report whether the extra-body text currently blocks a save. */
+  readonly onExtraBodyValidity?: ((invalid: boolean) => void) | undefined
 }
+
+/** What the connection test last reported. */
+type ConnectionReport =
+  | { readonly kind: 'idle' }
+  | { readonly kind: 'busy' }
+  | { readonly kind: 'ok'; readonly count: number; readonly latencyMs: number }
+  | { readonly kind: 'failed'; readonly message: string }
 
 /**
  * Render one provider's fields.
@@ -45,10 +73,46 @@ export function ProviderFields(props: ProviderFieldsProps): ReactNode {
   const { provider, t, disabled } = props
   const protocol = provider.interfaceType
   const keyRef = provider.apiKeyEnv ?? deriveKeyRef(props.route)
+  const [extraBodyText, setExtraBodyText] = useState(() => spellExtraBody(provider.extraBody))
+  const [advancedOpen, setAdvancedOpen] = useState(() => Object.keys(provider.extraBody ?? {}).length > 0)
+  const [connection, setConnection] = useState<ConnectionReport>({ kind: 'idle' })
+  const extraBodyId = useId()
+  const validityRef = useRef(props.onExtraBodyValidity)
+  validityRef.current = props.onExtraBodyValidity
+  const extraBodyParse = parseExtraBody(extraBodyText)
+  const extraBodyFailureKey = extraBodyFailure(extraBodyParse)
+  useEffect(() => () => { validityRef.current?.(false) }, [])
+  const editExtraBody = (text: string): void => {
+    setExtraBodyText(text)
+    const parsed = parseExtraBody(text)
+    const invalid = extraBodyFailure(parsed) !== undefined
+    props.onExtraBodyValidity?.(invalid)
+    if (parsed.kind === 'object') props.onPatch({ extraBody: parsed.value })
+    else if (parsed.kind === 'empty') props.onPatch({ extraBody: undefined })
+  }
+  const testConnection = async (): Promise<void> => {
+    if (props.onDiscover === undefined) return
+    setConnection({ kind: 'busy' })
+    const started = Date.now()
+    try {
+      const answer = await props.onDiscover({
+        provider: props.route,
+        ...(provider.baseURL === undefined ? {} : { baseURL: provider.baseURL }),
+        ...(provider.interfaceType === undefined ? {} : { api: provider.interfaceType }),
+      })
+      const latencyMs = Date.now() - started
+      setConnection(answer.kind === 'found'
+        ? { kind: 'ok', count: answer.models.length, latencyMs }
+        : { kind: 'failed', message: answer.message })
+    } catch (error) {
+      setConnection({ kind: 'failed', message: error instanceof Error ? error.message : String(error) })
+    }
+  }
   return (
-    <div style={styles['cardBody']}>
-      <FieldGroup title={t('sectionConnection')}>
-        <div style={styles['grid2']}>
+    <div className="dsl-root">
+      <PageStyle />
+      <SectionCard title={t('sectionConnection')} hint={t('connectionSectionHint')}>
+        <div className="dsl-grid">
           <Field label={t('displayName')}>
             <TextInput
               value={provider.displayName ?? ''}
@@ -71,9 +135,31 @@ export function ProviderFields(props: ProviderFieldsProps): ReactNode {
             value={provider.baseURL ?? ''}
             placeholder={t('baseURLPlaceholder')}
             disabled={disabled}
+            type="url"
             onChange={(value) => { props.onPatch({ baseURL: value === '' ? undefined : value }) }}
           />
         </Field>
+        <div className="dsl-row">
+          <ActionButton
+            small
+            outline
+            disabled={disabled || connection.kind === 'busy' || props.onDiscover === undefined}
+            onClick={() => { void testConnection() }}
+          >
+            {connection.kind === 'busy' ? t('connectionTesting') : t('connectionTest')}
+          </ActionButton>
+          {connection.kind === 'ok'
+            ? (
+              <>
+                <Chip tone="success" title={t('connectionOk')}>
+                  {t('connectionModels', { count: String(connection.count) })} · {t('connectionLatency', { ms: String(connection.latencyMs) })}
+                </Chip>
+              </>
+            )
+            : connection.kind === 'failed'
+              ? <span role="alert" className="dsl-error">{t('connectionFailed', { message: connection.message })}</span>
+              : <span className="dsl-hint">{t('connectionHint')}</span>}
+        </div>
         <Toggle
           label={t('enabled')}
           hint={t('enabledHint')}
@@ -81,9 +167,9 @@ export function ProviderFields(props: ProviderFieldsProps): ReactNode {
           disabled={disabled}
           onChange={(checked) => { props.onPatch({ enabled: checked ? undefined : false }) }}
         />
-      </FieldGroup>
+      </SectionCard>
 
-      <FieldGroup title={t('sectionCredential')} hint={t('credentialSectionHint')}>
+      <SectionCard title={t('sectionCredential')} hint={t('credentialSectionHint')}>
         <Field label={t('apiKeyRef')} hint={t('apiKeyRefHint')}>
           <TextInput
             value={provider.apiKeyEnv ?? ''}
@@ -99,10 +185,9 @@ export function ProviderFields(props: ProviderFieldsProps): ReactNode {
           onStoreKey={props.onStoreKey}
           onAdoptRef={(ref) => { props.onPatch({ apiKeyEnv: ref }) }}
         />
-      </FieldGroup>
+      </SectionCard>
 
-      <FieldGroup title={t('sectionBehavior')}>
-        {/* A value staged under another protocol stays switchable-off instead of hiding with the control. */}
+      <SectionCard title={t('sectionBehavior')}>
         {protocol === 'openai-chat-completions' || provider.includeUsage === true
           ? (
             <Toggle
@@ -125,7 +210,7 @@ export function ProviderFields(props: ProviderFieldsProps): ReactNode {
             />
           )
           : null}
-        <div style={styles['grid2']}>
+        <div className="dsl-grid">
           <IntegerField
             label={t('concurrency')}
             hint={t('concurrencyHint')}
@@ -155,12 +240,38 @@ export function ProviderFields(props: ProviderFieldsProps): ReactNode {
             onChange={(value) => { props.onPatch({ defaultMaxTokens: value }) }}
           />
         </div>
-      </FieldGroup>
+      </SectionCard>
 
-      <aside style={styles['note']}>
-        <strong style={styles['subhead']}>{t('advancedTitle')}</strong>
-        <span style={styles['hint']}>{t('advancedHint')}</span>
-      </aside>
+      <details
+        className="dsl-details"
+        open={advancedOpen}
+        onToggle={(event) => { setAdvancedOpen(event.currentTarget.open) }}
+      >
+        <summary>
+          {t('advancedTitle')}
+          <Chip>JSON</Chip>
+        </summary>
+        <div className="dsl-details-body">
+          <Field
+            label={t('extraBody')}
+            hint={t('extraBodyHint')}
+            error={extraBodyFailureKey === undefined ? undefined : t(extraBodyFailureKey)}
+            htmlFor={extraBodyId}
+          >
+            <textarea
+              id={extraBodyId}
+              className="dsl-textarea"
+              rows={6}
+              value={extraBodyText}
+              spellCheck={false}
+              disabled={disabled}
+              aria-invalid={extraBodyFailureKey !== undefined}
+              onChange={(event) => { editExtraBody(event.target.value) }}
+            />
+          </Field>
+          <p className="dsl-hint">{t('advancedHint')}</p>
+        </div>
+      </details>
     </div>
   )
 }
@@ -177,7 +288,6 @@ function CredentialInput(props: {
   const [value, setValue] = useState('')
   const [busy, setBusy] = useState(false)
   const [notice, setNotice] = useState<{ readonly kind: 'ok' | 'error'; readonly text: string } | undefined>(undefined)
-  // A reference change retargets the write-only control; never leave a typed secret in front of the new reference.
   useEffect(() => {
     setValue('')
     setNotice(undefined)
@@ -205,21 +315,28 @@ function CredentialInput(props: {
   }
   return (
     <Field label={props.t('secret')} hint={props.t('keyHelp')} htmlFor={inputId}>
-      <div style={styles['inline']}>
-        <input
-          id={inputId}
-          type="password"
-          style={{ ...styles['input'], flex: 1 }}
-          value={value}
-          placeholder={props.t('secretPlaceholder')}
-          disabled={props.disabled || busy}
-          autoComplete="off"
-          onChange={(event) => {
-            setValue(event.target.value)
-            if (notice !== undefined) setNotice(undefined)
-          }}
-        />
-        <ActionButton disabled={props.disabled || busy || value.trim().length === 0} onClick={() => { void store() }}>
+      <div className="dsl-row" style={{ flexWrap: 'nowrap' }}>
+        <div style={styles['grow']}>
+          <input
+            id={inputId}
+            type="password"
+            className="dsl-input"
+            value={value}
+            placeholder={props.t('secretPlaceholder')}
+            disabled={props.disabled || busy}
+            autoComplete="new-password"
+            onChange={(event) => {
+              setValue(event.target.value)
+              if (notice !== undefined) setNotice(undefined)
+            }}
+          />
+        </div>
+        <ActionButton
+          small
+          outline
+          disabled={props.disabled || busy || value.trim().length === 0}
+          onClick={() => { void store() }}
+        >
           {busy ? props.t('storingKey') : props.t('storeKey')}
         </ActionButton>
       </div>
@@ -229,7 +346,7 @@ function CredentialInput(props: {
           <span
             role="status"
             aria-live={notice.kind === 'error' ? 'assertive' : 'polite'}
-            style={notice.kind === 'error' ? styles['error'] : styles['success']}
+            className={notice.kind === 'error' ? 'dsl-error' : 'dsl-success'}
           >
             {notice.text}
           </span>

@@ -1,13 +1,17 @@
 /**
- * One provider's model list: the declared ids and capacities, the capability
- * declarations a request path reads, and the endpoint's own model listing.
+ * One provider's model catalog: a compact filterable list, one expanded model
+ * editor, endpoint discovery, and the documented family defaults that make a
+ * bare model id usable without hand-writing capability declarations.
  *
  * @module @snnh/dsh-llm-service-lite/client/ModelsEditor
  */
 
-import { useId, useState, type ReactNode } from 'react'
+import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
+import type { ServiceLiteKey } from './locales.ts'
 import type { ServiceLiteTranslate } from './types.ts'
-import { applyPatch, capabilitiesOf, modelsOf, splitList, toggleListValue } from './model.ts'
+import { applyModelDefaults } from './family-defaults.ts'
+import { declaredDefaultsOf } from '../model-defaults.ts'
+import { applyPatch, capabilitiesOf, modelsOf, toggleListValue } from './model.ts'
 import {
   EFFORT_LEVELS,
   MODALITIES,
@@ -20,13 +24,49 @@ import {
   type DiscoveryRequest,
   type EffortLevel,
   type InterfaceType,
+  type ModelCapabilities,
   type ModelPatch,
   type Modality,
   type ProviderPatch,
   type ThinkingMode,
   type ThinkingStyle,
 } from './types.ts'
-import { ActionButton, Chip, Field, IntegerField, SelectField, TextInput, Toggle, styles } from './ui.tsx'
+import {
+  ActionButton,
+  Chip,
+  ChoiceChip,
+  Field,
+  IntegerField,
+  PageStyle,
+  TextInput,
+  Toggle,
+} from './ui.tsx'
+
+/** The label each effort level is shown under. */
+const EFFORT_LABEL: Readonly<Record<EffortLevel, ServiceLiteKey>> = {
+  minimal: 'effortMinimal',
+  low: 'effortLow',
+  medium: 'effortMedium',
+  high: 'effortHigh',
+  xhigh: 'effortXhigh',
+  max: 'effortMax',
+  ultra: 'effortUltra',
+}
+
+/** The label each thinking mode is shown under. */
+const THINKING_LABEL: Readonly<Record<ThinkingMode, 'thinkingAdaptive' | 'thinkingEnabled' | 'thinkingDisabled'>> = {
+  adaptive: 'thinkingAdaptive',
+  enabled: 'thinkingEnabled',
+  disabled: 'thinkingDisabled',
+}
+
+/** The label each thinking-switch spelling is shown under. */
+const THINKING_STYLE_LABEL: Readonly<Record<ThinkingStyle, ServiceLiteKey>> = {
+  thinking: 'thinkingStyleThinking',
+  fixed: 'thinkingStyleFixed',
+  enable_thinking: 'thinkingStyleEnableThinking',
+  effort_only: 'thinkingStyleEffortOnly',
+}
 
 /** Props one provider's model editor receives. */
 export interface ModelsEditorProps {
@@ -44,26 +84,75 @@ export interface ModelsEditorProps {
   readonly onDiscover: (request: DiscoveryRequest) => Promise<DiscoveryOutcome>
 }
 
+/** Format a token capacity compactly for a summary chip. */
+function compactTokens(value: number): string {
+  if (value >= 1_000_000) return `${String(Number((value / 1_000_000).toFixed(1)))}M`
+  if (value >= 1_000) return `${String(Math.round(value / 1_000))}K`
+  return String(value)
+}
+
+/** The documented capabilities for one model id, when the family table knows it. */
+function suggestedCapabilities(id: string, protocol: InterfaceType | undefined): ModelCapabilities | undefined {
+  const trimmed = id.trim()
+  if (trimmed.length === 0) return undefined
+  const declared = declaredDefaultsOf(trimmed, protocol)
+  return declared?.capabilities as unknown as ModelCapabilities | undefined
+}
+
+/** Whether a profile field is absent, including a schema-materialized empty list. */
+function isUnset(value: unknown): boolean {
+  return value === undefined || (Array.isArray(value) && value.length === 0)
+}
+
+/** Whether any documented capability is still absent from the model. */
+function hasMissingSuggestion(current: ModelCapabilities, suggested: ModelCapabilities | undefined): boolean {
+  if (suggested === undefined) return false
+  return (['modalities', 'effort', 'thinking', 'thinkingStyle', 'reasoningContent', 'replayReasoning'] as const)
+    .some(key => isUnset(current[key]) && suggested[key] !== undefined)
+}
+
 /**
- * Render one provider's model list.
+ * Render one provider's model catalog.
  * @param props - the staged profile and its staging callbacks.
- * @returns the model editor.
+ * @returns the catalog, discovery panel, and selected model editor.
  */
 export function ModelsEditor(props: ModelsEditorProps): ReactNode {
   const { provider, t, disabled } = props
   const models = modelsOf(provider)
   const protocol = provider.interfaceType
   const headingId = useId()
-  const discoveryId = useId()
+  const searchId = useId()
+  const [query, setQuery] = useState('')
+  const [selected, setSelected] = useState<number | undefined>(undefined)
+  const [discovered, setDiscovered] = useState<readonly ClientModel[] | undefined>(undefined)
+  const [message, setMessage] = useState<{ readonly kind: 'status' | 'error'; readonly text: string } | undefined>(undefined)
+  const [busy, setBusy] = useState(false)
+  const [defaultsNotice, setDefaultsNotice] = useState<string | undefined>(undefined)
+  const detailRef = useRef<HTMLDivElement>(null)
   const write = (next: ClientModel[]): void => { props.onPatch({ models: next }) }
   const patchModel = (index: number, patch: ModelPatch): void => {
     write(models.map((model, position) => (position === index ? applyPatch(model, patch) : model)))
   }
-  const [discovered, setDiscovered] = useState<readonly ClientModel[] | undefined>(undefined)
-  const [message, setMessage] = useState<{ readonly kind: 'status' | 'error'; readonly text: string } | undefined>(undefined)
-  const [busy, setBusy] = useState(false)
-  // The row a click just created gets the focus once it mounts; index-based keys keep the input mounted while its id is typed.
-  const [focusIndex, setFocusIndex] = useState<number | undefined>(undefined)
+  const normalizedQuery = query.trim().toLocaleLowerCase()
+  const visible = models
+    .map((model, index) => ({ model, index }))
+    .filter(({ model }) => normalizedQuery.length === 0
+      || model.id.toLocaleLowerCase().includes(normalizedQuery)
+      || (model.name ?? '').toLocaleLowerCase().includes(normalizedQuery))
+  const selectedModel = selected === undefined ? undefined : models[selected]
+  const selectedSuggested = selectedModel === undefined
+    ? undefined
+    : suggestedCapabilities(selectedModel.id, protocol)
+  const pendingDefaults = models.filter(model => hasMissingSuggestion(
+    capabilitiesOf(model),
+    suggestedCapabilities(model.id, protocol),
+  )).length
+  // A row below the fold would otherwise require a manual scroll to the editor
+  // it just opened.
+  useEffect(() => {
+    if (selected !== undefined) detailRef.current?.scrollIntoView({ block: 'nearest' })
+  }, [selected])
+  const candidates = (discovered ?? []).filter(candidate => !models.some(model => model.id === candidate.id))
   const discover = async (): Promise<void> => {
     setBusy(true)
     setMessage(undefined)
@@ -94,120 +183,232 @@ export function ModelsEditor(props: ModelsEditorProps): ReactNode {
       setBusy(false)
     }
   }
-  const candidates = (discovered ?? []).filter(candidate => !models.some(model => model.id === candidate.id))
-  const add = (candidate: ClientModel): void => { write([...models, candidate]) }
+  const add = (candidate: ClientModel): void => {
+    setSelected(models.length)
+    write([...models, candidate])
+  }
   const addBlank = (): void => {
-    setFocusIndex(models.length)
+    setSelected(models.length)
     write([...models, { id: '' }])
   }
+  const applyDefaults = (): void => {
+    const outcome = applyModelDefaults(provider)
+    const filled = outcome.applied.filter(item => item.fields.length > 0).length
+    if (filled === 0) {
+      setDefaultsNotice(t('modelDefaultsNone'))
+      return
+    }
+    props.onPatch({ models: outcome.models })
+    setDefaultsNotice(outcome.unmatched.length === 0
+      ? t('modelDefaultsApplied', { count: String(filled) })
+      : t('modelDefaultsAppliedSome', { count: String(filled), unmatched: String(outcome.unmatched.length) }))
+  }
+  const remove = (index: number): void => {
+    write(models.filter((_entry, position) => position !== index))
+    if (selected === index) setSelected(undefined)
+    else if (selected !== undefined && selected > index) setSelected(selected - 1)
+  }
   return (
-    <section aria-labelledby={headingId} style={styles['cardBody']}>
-      <div style={styles['inline']}>
-        <h5 id={headingId} style={styles['groupTitle']}>{t('modelsTitle')}</h5>
-        <Chip>{t('modelCount', { count: String(models.length) })}</Chip>
-      </div>
-      {models.length === 0 ? <p style={styles['muted']}>{t('modelsEmpty')}</p> : null}
-      {models.map((model, index) => (
-        <ModelCard
-          key={index}
-          model={model}
-          models={models}
-          index={index}
-          protocol={protocol}
-          t={t}
-          disabled={disabled}
-          autoFocus={focusIndex === index}
-          onPatch={(patch) => { patchModel(index, patch) }}
-          onRemove={() => { write(models.filter((_entry, position) => position !== index)) }}
-        />
-      ))}
-      <div style={styles['inline']}>
-        <ActionButton disabled={disabled} onClick={addBlank}>{t('addModel')}</ActionButton>
-      </div>
-
-      <section aria-labelledby={discoveryId} aria-busy={busy} style={styles['result']}>
-        <div style={styles['inline']}>
-          <h6 id={discoveryId} style={styles['subhead']}>{t('discoveryTitle')}</h6>
-          <ActionButton disabled={disabled || busy} onClick={() => { void discover() }}>
-            {busy ? t('discoveryFetching') : t('discoveryFetch')}
+    <div className="dsl-root dsl-models">
+      <PageStyle />
+      <div className="dsl-card-head">
+        <div>
+          <div className="dsl-section-head">
+            <h5 id={headingId} className="dsl-section-title">{t('modelsTitle')}</h5>
+            <Chip>{t('modelCount', { count: String(models.length) })}</Chip>
+            {pendingDefaults === 0
+              ? null
+              : <Chip tone="danger">{t('modelDefaultsPending', { count: String(pendingDefaults) })}</Chip>}
+          </div>
+          <p className="dsl-card-sub">{t('modelsHint')}</p>
+        </div>
+        <div className="dsl-row">
+          <ActionButton small outline disabled={disabled} onClick={addBlank}>{t('addModel')}</ActionButton>
+          <ActionButton small outline disabled={disabled || busy} onClick={() => { void discover() }}>
+            {busy ? t('discoveryFetching') : t('discoveryTitle')}
           </ActionButton>
         </div>
-        <p style={styles['hint']}>{t('discoveryHint')}</p>
-        {message === undefined
-          ? null
+      </div>
+
+      <div className="dsl-row">
+        <label htmlFor={searchId} className="dsl-hint" style={{ flex: '0 0 auto' }}>{t('searchModels')}</label>
+        <div style={{ flex: '1 1 150px', minWidth: 0 }}>
+          <input
+            id={searchId}
+            className="dsl-input"
+            value={query}
+            placeholder={t('searchModelsPlaceholder')}
+            disabled={disabled}
+            onChange={(event) => { setQuery(event.target.value) }}
+          />
+        </div>
+        <ActionButton small outline disabled={disabled} onClick={applyDefaults}>
+          {t('modelDefaults')}
+        </ActionButton>
+      </div>
+      <p className="dsl-hint">{t('modelDefaultsHint')}</p>
+      {defaultsNotice === undefined ? null : <div className="dsl-note dsl-note--info" role="status">{defaultsNotice}</div>}
+      {pendingDefaults === 0
+        ? null
+        : (
+          <div className="dsl-note dsl-note--info">
+            <div>
+              <strong>{t('modelDefaultsPending', { count: String(pendingDefaults) })}</strong>
+              <span className="dsl-hint">{t('modelDefaultsHint')}</span>
+            </div>
+          </div>
+        )}
+
+      {models.length === 0
+        ? (
+          <div className="dsl-empty">
+            <span className="dsl-empty-title">{t('modelsEmptyTitle')}</span>
+            <span className="dsl-empty-hint">{t('modelsEmpty')}</span>
+            <div className="dsl-row">
+              <ActionButton small primary disabled={disabled} onClick={addBlank}>{t('addModel')}</ActionButton>
+              <ActionButton small outline disabled={disabled || busy} onClick={() => { void discover() }}>
+                {t('discoveryFetch')}
+              </ActionButton>
+            </div>
+          </div>
+        )
+        : visible.length === 0
+          ? <div className="dsl-note">{t('modelsFilteredEmpty')}</div>
           : (
-            <p
-              role={message.kind === 'error' ? 'alert' : 'status'}
-              style={message.kind === 'error' ? styles['error'] : styles['muted']}
-            >
-              {message.text}
-            </p>
-          )}
-        {discovered === undefined
-          ? null
-          : candidates.length === 0
-            ? <p style={styles['muted']} role="status">{t('discoveryAllAdded')}</p>
-            : (
-              <div style={styles['result']}>
-                <div style={styles['inline']}>
-                  <strong style={styles['subhead']}>{t('discoveryFound', { count: String(discovered.length) })}</strong>
-                  <span style={{ flex: 1 }} />
-                  <ActionButton
-                    disabled={disabled || busy}
-                    onClick={() => { write([...models, ...candidates]) }}
+            <div className="dsl-model-list" aria-labelledby={headingId}>
+              {visible.map(({ model, index }) => {
+                const capabilities = capabilitiesOf(model)
+                return (
+                  <button
+                    key={index}
+                    type="button"
+                    className="dsl-model"
+                    data-selected={selected === index}
+                    aria-expanded={selected === index}
+                    onClick={() => { setSelected(selected === index ? undefined : index) }}
                   >
-                    {t('discoveryAddAll')}
-                  </ActionButton>
-                </div>
-                <ul style={styles['candidateList']}>
+                    <span className="dsl-model-main">
+                      <span className="dsl-model-id">{model.id.trim().length === 0 ? t('modelUntitled') : model.id}</span>
+                      {model.name === undefined || model.name.trim().length === 0
+                        ? null
+                        : <span className="dsl-model-name">{model.name}</span>}
+                    </span>
+                    <span className="dsl-model-facts">
+                      {model.contextWindow === undefined ? null : <Chip>{compactTokens(model.contextWindow)}</Chip>}
+                      {(capabilities.effort ?? []).length === 0
+                        ? null
+                        : <Chip on>{t('reasoningCount', { count: String(capabilities.effort?.length ?? 0) })}</Chip>}
+                      {capabilities.tools === false ? <Chip>{t('toolsOff')}</Chip> : null}
+                      {(capabilities.effort ?? []).length === 0 && suggestedCapabilities(model.id, protocol)?.effort === undefined
+                        ? <Chip>{t('effortUnsetShort')}</Chip>
+                        : null}
+                      {capabilities.imageOutput === true ? <Chip>{t('modelImageShort')}</Chip> : null}
+                    </span>
+                    <span className="dsl-chevron" aria-hidden="true">{selected === index ? '−' : '›'}</span>
+                  </button>
+                )
+              })}
+            </div>
+          )}
+
+      {discovered === undefined
+        ? null
+        : (
+          <section className="dsl-discovery" aria-busy={busy}>
+            <div className="dsl-card-head">
+              <div>
+                <strong className="dsl-section-title">{t('discoveryFound', { count: String(discovered.length) })}</strong>
+                <p className="dsl-card-sub">{t('discoveryHint')}</p>
+              </div>
+              <div className="dsl-row">
+                {candidates.length === 0
+                  ? null
+                  : (
+                    <ActionButton
+                      small
+                      primary
+                      disabled={disabled || busy}
+                      onClick={() => { write([...models, ...candidates]) }}
+                    >
+                      {t('discoveryAddAll')}
+                    </ActionButton>
+                  )}
+                <ActionButton small quiet onClick={() => { setDiscovered(undefined); setMessage(undefined) }}>
+                  {t('close')}
+                </ActionButton>
+              </div>
+            </div>
+            {message === undefined ? null : (
+              <p role={message.kind === 'error' ? 'alert' : 'status'} className={message.kind === 'error' ? 'dsl-error' : 'dsl-hint'}>
+                {message.text}
+              </p>
+            )}
+            {candidates.length === 0
+              ? <p className="dsl-hint" role="status">{t('discoveryAllAdded')}</p>
+              : (
+                <div className="dsl-candidates">
                   {candidates.map((candidate, position) => (
-                    <li key={`${candidate.id}:${String(position)}`} style={styles['candidateRow']}>
-                      <span id={`${discoveryId}-candidate-${String(position)}`} style={styles['mono']}>{candidate.id}</span>
-                      {candidate.name === undefined ? null : <span style={styles['muted']}>{candidate.name}</span>}
+                    <div key={`${candidate.id}:${String(position)}`} className="dsl-candidate">
+                      <span className="dsl-candidate-id">{candidate.id}</span>
                       {candidate.contextWindow === undefined
                         ? null
-                        : <span style={styles['muted']}>{String(candidate.contextWindow)}</span>}
-                      <span style={{ flex: 1 }} />
-                      <ActionButton
-                        disabled={disabled || busy}
-                        ariaDescribedBy={`${discoveryId}-candidate-${String(position)}`}
-                        onClick={() => { add(candidate) }}
-                      >
+                        : <span className="dsl-candidate-meta">{compactTokens(candidate.contextWindow)}</span>}
+                      <ActionButton small outline disabled={disabled || busy} onClick={() => { add(candidate) }}>
                         {t('discoveryAdd')}
                       </ActionButton>
-                    </li>
+                    </div>
                   ))}
-                </ul>
-              </div>
-            )}
-      </section>
-    </section>
+                </div>
+              )}
+          </section>
+        )}
+
+      {message !== undefined && discovered === undefined
+        ? <p role={message.kind === 'error' ? 'alert' : 'status'} className={message.kind === 'error' ? 'dsl-error' : 'dsl-hint'}>{message.text}</p>
+        : null}
+
+      <div ref={detailRef}>
+        {selectedModel === undefined
+          ? null
+          : (
+            <ModelDetail
+              model={selectedModel}
+              models={models}
+              index={selected ?? 0}
+              protocol={protocol}
+              suggested={selectedSuggested}
+              t={t}
+              disabled={disabled}
+              onPatch={(patch) => { patchModel(selected ?? 0, patch) }}
+              onRemove={() => { remove(selected ?? 0) }}
+              onClose={() => { setSelected(undefined) }}
+            />
+          )}
+      </div>
+    </div>
   )
 }
 
-/** One model card: identity, capacities, and the capability declarations the request path reads. */
-function ModelCard(props: {
+/** One selected model's full editor. */
+function ModelDetail(props: {
   readonly model: ClientModel
   readonly models: readonly ClientModel[]
   readonly index: number
   readonly protocol: InterfaceType | undefined
+  readonly suggested: ModelCapabilities | undefined
   readonly t: ServiceLiteTranslate
   readonly disabled: boolean
-  readonly autoFocus: boolean
   readonly onPatch: (patch: ModelPatch) => void
   readonly onRemove: () => void
+  readonly onClose: () => void
 }): ReactNode {
-  const { model, t, disabled, protocol } = props
+  const { model, t, disabled, suggested } = props
   const capabilities = capabilitiesOf(model)
-  const modalities = capabilities.modalities ?? []
-  const modalitiesId = useId()
-  const titleId = useId()
   const duplicate = model.id.length > 0
     && props.models.some((other, position) => position !== props.index && other.id === model.id)
   const idError = model.id.length === 0
     ? t('modelIdRequired')
     : duplicate ? t('modelDuplicate', { model: model.id }) : undefined
-  const title = model.id.trim().length === 0 ? t('modelUntitled') : model.id
   const setCapabilities = (patch: CapabilitiesPatch): void => {
     const next = applyPatch(capabilities, patch)
     for (const key of ['modalities', 'effort', 'thinking'] as const) {
@@ -215,27 +416,36 @@ function ModelCard(props: {
     }
     props.onPatch({ capabilities: next })
   }
+  const fillSuggested = (): void => {
+    if (suggested === undefined) return
+    const next: ModelCapabilities = { ...capabilities }
+    if (isUnset(next.modalities) && suggested.modalities !== undefined) next.modalities = [...suggested.modalities]
+    if (isUnset(next.effort) && suggested.effort !== undefined) next.effort = [...suggested.effort]
+    if (isUnset(next.thinking) && suggested.thinking !== undefined) next.thinking = [...suggested.thinking]
+    if (isUnset(next.thinkingStyle) && suggested.thinkingStyle !== undefined) next.thinkingStyle = suggested.thinkingStyle
+    if (isUnset(next.reasoningContent) && suggested.reasoningContent !== undefined) next.reasoningContent = suggested.reasoningContent
+    if (isUnset(next.replayReasoning) && suggested.replayReasoning !== undefined) next.replayReasoning = suggested.replayReasoning
+    props.onPatch({ capabilities: next })
+  }
   return (
-    <div style={styles['modelCard']}>
-      <div style={styles['modelHead']}>
-        <h6 id={titleId} style={styles['modelTitle']}>{title}</h6>
-        <span style={{ flex: 1 }} />
-        <ActionButton
-          danger
-          disabled={disabled}
-          ariaDescribedBy={titleId}
-          onClick={props.onRemove}
-        >
-          {t('removeModel')}
-        </ActionButton>
+    <section className="dsl-editor" aria-label={t('editModel')}>
+      <div className="dsl-editor-head">
+        <div className="dsl-editor-title">
+          <strong className="dsl-editor-id">{model.id.trim().length === 0 ? t('modelUntitled') : model.id}</strong>
+          <span className="dsl-hint">{t('editModel')}</span>
+        </div>
+        <div className="dsl-row">
+          <ActionButton small quiet disabled={disabled} onClick={props.onClose}>{t('close')}</ActionButton>
+          <ActionButton small danger disabled={disabled} onClick={props.onRemove}>{t('removeModel')}</ActionButton>
+        </div>
       </div>
-      <div style={styles['grid2']}>
+
+      <div className="dsl-grid">
         <Field label={t('modelId')} error={idError}>
           <TextInput
             value={model.id}
             placeholder={t('modelIdPlaceholder')}
             disabled={disabled}
-            autoFocus={props.autoFocus}
             onChange={(value) => { props.onPatch({ id: value }) }}
           />
         </Field>
@@ -260,55 +470,94 @@ function ModelCard(props: {
           onChange={(value) => { props.onPatch({ maxTokens: value }) }}
         />
       </div>
-      <div style={styles['capabilities']}>
-        <p style={styles['subhead']}>{t('capabilities')}</p>
-        <div role="group" aria-labelledby={modalitiesId} style={styles['inline']}>
-          <span id={modalitiesId} style={styles['label']}>{t('modalities')}</span>
-          {MODALITIES.map((modality: Modality) => (
-            <label key={modality} style={styles['checkboxLabel']}>
-              <input
-                type="checkbox"
+
+      <div className="dsl-cap">
+        <div className="dsl-row" style={{ justifyContent: 'space-between' }}>
+          <strong className="dsl-cap-title">{t('capabilities')}</strong>
+          {suggested !== undefined && hasMissingSuggestion(capabilities, suggested)
+            ? <ActionButton small quiet disabled={disabled} onClick={fillSuggested}>{t('useRecommended')}</ActionButton>
+            : null}
+        </div>
+
+        <div className="dsl-cap-row">
+          <span className="dsl-cap-label">{t('modalities')}</span>
+          <div className="dsl-cap-options">
+            {MODALITIES.map((modality: Modality) => (
+              <ChoiceChip
+                key={modality}
+                label={t(modality === 'text' ? 'modalityText' : modality === 'image' ? 'modalityImage' : 'modalityVideo')}
+                selected={(capabilities.modalities ?? []).includes(modality)}
                 disabled={disabled}
-                checked={modalities.includes(modality)}
-                onChange={() => {
-                  setCapabilities({ modalities: toggleListValue(modalities, modality, MODALITIES) })
-                }}
+                onToggle={() => { setCapabilities({ modalities: toggleListValue(capabilities.modalities, modality, MODALITIES) }) }}
               />
-              {t(modality === 'text' ? 'modalityText' : modality === 'image' ? 'modalityImage' : 'modalityVideo')}
-            </label>
-          ))}
+            ))}
+          </div>
         </div>
-        <div style={styles['grid2']}>
-          <Field label={t('effort')} hint={t('effortHint')}>
-            <TextInput
-              value={(capabilities.effort ?? []).join(', ')}
-              disabled={disabled}
-              onChange={(value) => {
-                const next = splitList(value).filter((entry): entry is EffortLevel => (EFFORT_LEVELS as readonly string[]).includes(entry))
-                setCapabilities({ effort: next.length === 0 ? undefined : next })
-              }}
-            />
-          </Field>
-          <Field label={t('thinking')} hint={t('thinkingHint')}>
-            <TextInput
-              value={(capabilities.thinking ?? []).join(', ')}
-              disabled={disabled}
-              onChange={(value) => {
-                const next = splitList(value).filter((entry): entry is ThinkingMode => (THINKING_MODES as readonly string[]).includes(entry))
-                setCapabilities({ thinking: next.length === 0 ? undefined : next })
-              }}
-            />
-          </Field>
-          <SelectField
-            label={t('thinkingStyle')}
-            value={capabilities.thinkingStyle ?? ''}
-            unsetLabel={t('thinkingStyleDefault')}
-            options={THINKING_STYLES.map(style => ({ value: style, label: style }))}
-            disabled={disabled}
-            onChange={(value) => { setCapabilities({ thinkingStyle: value === '' ? undefined : (value as ThinkingStyle) }) }}
-          />
+
+        <div className="dsl-cap-row">
+          <span className="dsl-cap-label">{t('effort')}</span>
+          <div className="dsl-cap-options">
+            {EFFORT_LEVELS.map((level: EffortLevel) => (
+              <ChoiceChip
+                key={level}
+                label={t(EFFORT_LABEL[level])}
+                selected={(capabilities.effort ?? []).includes(level)}
+                disabled={disabled}
+                title={level}
+                onToggle={() => { setCapabilities({ effort: toggleListValue(capabilities.effort, level, EFFORT_LEVELS) }) }}
+              />
+            ))}
+          </div>
         </div>
-        <div style={styles['grid2']}>
+        <span className="dsl-cap-hint">{t('effortHint')}</span>
+        {(capabilities.effort ?? []).length === 0
+          ? (
+            <span className="dsl-hint">
+              {suggested?.effort === undefined
+                ? t('effortEmptyHint')
+                : t('effortRecommendation', { levels: suggested.effort.map(level => t(EFFORT_LABEL[level])).join(' / ') })}
+            </span>
+          )
+          : null}
+
+        <div className="dsl-cap-row">
+          <span className="dsl-cap-label">{t('thinking')}</span>
+          <div className="dsl-cap-options">
+            {THINKING_MODES.map((mode: ThinkingMode) => (
+              <ChoiceChip
+                key={mode}
+                label={t(THINKING_LABEL[mode])}
+                selected={(capabilities.thinking ?? []).includes(mode)}
+                disabled={disabled}
+                onToggle={() => { setCapabilities({ thinking: toggleListValue(capabilities.thinking, mode, THINKING_MODES) }) }}
+              />
+            ))}
+          </div>
+        </div>
+        <span className="dsl-cap-hint">{t('thinkingHint')}</span>
+
+        <div className="dsl-cap-row">
+          <span className="dsl-cap-label">{t('thinkingStyle')}</span>
+          <div style={{ flex: '1 1 200px', minWidth: 0 }}>
+            <select
+              className="dsl-select"
+              aria-label={t('thinkingStyle')}
+              value={capabilities.thinkingStyle ?? ''}
+              disabled={disabled}
+              onChange={(event) => {
+                const value = event.target.value
+                setCapabilities({ thinkingStyle: value === '' ? undefined : (value as ThinkingStyle) })
+              }}
+            >
+              <option value="">{t('thinkingStyleDefault')}</option>
+              {THINKING_STYLES.map(style => (
+                <option key={style} value={style}>{t(THINKING_STYLE_LABEL[style])}</option>
+              ))}
+            </select>
+          </div>
+        </div>
+
+        <div className="dsl-stack" style={{ gap: 8 }}>
           <Toggle
             label={t('reasoningContent')}
             checked={capabilities.reasoningContent === true}
@@ -321,8 +570,7 @@ function ModelCard(props: {
             disabled={disabled}
             onChange={(checked) => { setCapabilities({ tools: checked ? undefined : false }) }}
           />
-          {/* The Anthropic Messages wire has no assistant image part. */}
-          {protocol === 'anthropic-messages'
+          {props.protocol === 'anthropic-messages'
             ? null
             : (
               <Toggle
@@ -333,8 +581,7 @@ function ModelCard(props: {
                 onChange={(checked) => { setCapabilities({ imageOutput: checked ? true : undefined }) }}
               />
             )}
-          {/* Only the Responses wire replays signed reasoning items. */}
-          {protocol === 'openai-responses'
+          {props.protocol === 'openai-responses'
             ? (
               <Toggle
                 label={t('responsesEncryptedReplay')}
@@ -345,7 +592,15 @@ function ModelCard(props: {
             )
             : null}
         </div>
+        {suggested === undefined || !hasMissingSuggestion(capabilities, suggested)
+          ? null
+          : (
+            <div className="dsl-note">
+              <strong>{t('recommendedCapabilities')}</strong>
+              <span>{suggested.effort === undefined ? t('noRecommendation') : suggested.effort.map(level => t(EFFORT_LABEL[level])).join(' / ')}</span>
+            </div>
+          )}
       </div>
-    </div>
+    </section>
   )
 }

@@ -32,16 +32,54 @@ import type { ServiceLiteKey } from './locales.ts'
 const ROUTE_ID = /^[a-z][a-z0-9._-]*$/u
 
 /** The builder presets the add form offers. */
-export type PresetId = 'deepseek' | 'openai' | 'anthropic' | 'local' | 'custom'
+export type PresetId =
+  | 'deepseek'
+  | 'openai'
+  | 'anthropic'
+  | 'dashscope'
+  | 'qianfan'
+  | 'glm'
+  | 'zhipu'
+  | 'kimi'
+  | 'moonshot'
+  | 'openrouter'
+  | 'ollama'
+  | 'tencent'
+  | 'local'
+  | 'custom'
 
-/** Every builder preset, in offer order. */
-export const PRESET_IDS: readonly PresetId[] = ['deepseek', 'openai', 'anthropic', 'local', 'custom']
+/** Every builder preset, in offer order: the vendors first, then the local/custom entries. */
+export const PRESET_IDS: readonly PresetId[] = [
+  'deepseek',
+  'openai',
+  'anthropic',
+  'dashscope',
+  'qianfan',
+  'glm',
+  'zhipu',
+  'kimi',
+  'moonshot',
+  'openrouter',
+  'ollama',
+  'tencent',
+  'local',
+  'custom',
+]
 
 /** The route id each preset suggests when it is free. */
 const PRESET_ROUTE: Readonly<Record<PresetId, string>> = {
   deepseek: 'deepseek-direct',
   openai: 'openai-direct',
   anthropic: 'anthropic-direct',
+  dashscope: 'dashscope',
+  qianfan: 'qianfan',
+  glm: 'glm-coding',
+  zhipu: 'glm',
+  kimi: 'kimi-coding',
+  moonshot: 'moonshot',
+  openrouter: 'openrouter',
+  ollama: 'ollama',
+  tencent: 'tencent',
   local: 'local-vllm',
   custom: 'my-provider',
 }
@@ -107,6 +145,78 @@ export function presetProfile(preset: PresetId): ClientProvider {
           capabilities: { thinking: ['enabled', 'disabled'] },
         }],
       }
+    case 'dashscope':
+      return {
+        displayName: 'Alibaba DashScope',
+        interfaceType: 'openai-chat-completions',
+        baseURL: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+        includeUsage: true,
+        models: [],
+      }
+    case 'qianfan':
+      return {
+        displayName: 'Baidu Qianfan',
+        interfaceType: 'openai-chat-completions',
+        baseURL: 'https://qianfan.baidubce.com/v2',
+        includeUsage: true,
+        models: [],
+      }
+    case 'glm':
+      return {
+        displayName: 'GLM Coding Plan',
+        interfaceType: 'openai-chat-completions',
+        baseURL: 'https://open.bigmodel.cn/api/coding/paas/v4',
+        includeUsage: true,
+        models: [],
+      }
+    case 'zhipu':
+      return {
+        displayName: 'GLM',
+        interfaceType: 'openai-chat-completions',
+        baseURL: 'https://open.bigmodel.cn/api/paas/v4',
+        includeUsage: true,
+        models: [],
+      }
+    case 'kimi':
+      return {
+        displayName: 'Kimi Coding Plan',
+        interfaceType: 'openai-chat-completions',
+        baseURL: 'https://api.kimi.com/coding/v1',
+        includeUsage: true,
+        models: [],
+      }
+    case 'moonshot':
+      return {
+        displayName: 'Moonshot',
+        interfaceType: 'openai-chat-completions',
+        baseURL: 'https://api.moonshot.cn/v1',
+        includeUsage: true,
+        models: [],
+      }
+    case 'openrouter':
+      return {
+        displayName: 'OpenRouter',
+        interfaceType: 'openai-chat-completions',
+        baseURL: 'https://openrouter.ai/api/v1',
+        includeUsage: true,
+        models: [],
+      }
+    case 'ollama':
+      return {
+        displayName: 'Ollama (local)',
+        interfaceType: 'openai-chat-completions',
+        baseURL: 'http://localhost:11434/v1',
+        includeUsage: true,
+        models: [],
+      }
+    case 'tencent':
+      return {
+        displayName: 'Tencent Cloud',
+        interfaceType: 'openai-chat-completions',
+        baseURL: 'https://tokenhub.tencentmaas.com/v1',
+        includeUsage: true,
+        models: [],
+      }
     case 'local':
       return {
         displayName: 'Local vLLM',
@@ -156,8 +266,7 @@ export function routeFormatProblem(route: string): ProfileProblem | undefined {
   return undefined
 }
 
-/**
- * The refusal one user-typed route id earns, when it earns one.
+/** The refusal one user-typed route id earns, when it earns one.
  * @param route - the candidate route id.
  * @param providers - the routes the draft already holds.
  * @returns the locale key and params of the problem, or undefined when usable.
@@ -166,9 +275,11 @@ export function routeIdProblem(
   route: string,
   providers: Readonly<Record<string, unknown>>,
 ): ProfileProblem | undefined {
-  const format = routeFormatProblem(route)
-  if (format !== undefined) return format
+  if (route.length === 0) return { path: 'route', key: 'routeRequired' }
+  const owner = RESERVED_ROUTES[route]
+  if (owner !== undefined) return { path: 'route', key: 'routeReserved', params: { owner } }
   if (providers[route] !== undefined) return { path: 'route', key: 'routeTaken', params: { route } }
+  if (!ROUTE_ID.test(route)) return { path: 'route', key: 'routePattern' }
   return undefined
 }
 
@@ -204,8 +315,11 @@ export const EDITABLE_PROVIDER_FIELDS = [
   'enabled',
   'interfaceType',
   'baseURL',
+  'includeUsage',
+  'promptCaching',
   'apiKeyEnv',
   'apiKey',
+  'extraBody',
   'models',
   'maxConcurrent',
   'streamIdleTimeoutMs',
@@ -215,7 +329,12 @@ export const EDITABLE_PROVIDER_FIELDS = [
 
 /** The route's models as a typed list (a profile may carry none). */
 export function modelsOf(provider: ClientProvider): ClientModel[] {
-  return Array.isArray(provider.models) ? provider.models : []
+  return Array.isArray(provider.models) ? provider.models as ClientModel[] : []
+}
+
+/** One provider's capabilities, or an empty object. */
+export function capabilitiesOf(model: ClientModel): ModelCapabilities {
+  return model.capabilities ?? {}
 }
 
 /**
@@ -235,11 +354,6 @@ export function applyPatch<T extends object>(
     else out[key] = value
   }
   return out as T
-}
-
-/** One provider's capabilities, or an empty object. */
-export function capabilitiesOf(model: ClientModel): ModelCapabilities {
-  return model.capabilities ?? {}
 }
 
 /**
@@ -432,7 +546,7 @@ function cleanProvider(provider: ClientProvider): ClientProvider {
   if (out.headers !== undefined && Object.keys(out.headers).length === 0) delete out.headers
   if (out.extraBody !== undefined && Object.keys(out.extraBody).length === 0) delete out.extraBody
   if (out.models !== undefined) {
-    out.models = out.models.map(cleanModel)
+    out.models = (out.models as ClientModel[]).map(cleanModel)
     // An empty list and an absent list both advertise nothing; keep it absent.
     if (out.models.length === 0) delete out.models
   }
@@ -477,6 +591,53 @@ export function sameConfig(left: unknown, right: unknown): boolean {
 }
 
 /**
+ * Fields whose resolved-section default equals "not stated": a saved value
+ * equal to one of them needs no user-layer entry, so the override is dropped
+ * and a later default change still reaches the route.
+ */
+export const FIELD_DEFAULTS: Readonly<Record<string, unknown>> = {
+  enabled: true,
+  promptCaching: false,
+  includeUsage: false,
+  maxConcurrent: 3,
+  streamIdleTimeoutMs: 300_000,
+  defaultContextWindow: 256_000,
+  defaultMaxTokens: 65_536,
+}
+
+/**
+ * Read a providers dict out of one unknown layer, when it is one.
+ * @param layer - a resolved value, a composition layer, or a user layer.
+ * @returns the providers dictionary, or an empty one when the layer carries none.
+ */
+export function providersOf(layer: unknown): Record<string, ClientProvider> {
+  if (typeof layer !== 'object' || layer === null) return {}
+  const providers = (layer as { providers?: unknown }).providers
+  if (typeof providers !== 'object' || providers === null || Array.isArray(providers)) return {}
+  return providers as Record<string, ClientProvider>
+}
+
+/**
+ * Strip the empty placeholders a form leaves for one provider field before it
+ * is compared with a layer or stored.
+ * @param field - provider field name.
+ * @param value - the staged value.
+ * @returns the value a write would store, or undefined when it stores nothing.
+ */
+export function storedField(field: string, value: unknown): unknown {
+  if (value === undefined || value === '') return undefined
+  if (Array.isArray(value) && value.length === 0) return undefined
+  if (typeof value === 'object' && value !== null && !Array.isArray(value)
+    && Object.keys(value as Record<string, unknown>).length === 0) return undefined
+  if (field === 'models') {
+    const cleaned = cleanConfig({ providers: { route: { models: value } as ClientProvider } })
+      .providers['route']?.models
+    return cleaned
+  }
+  return value
+}
+
+/**
  * The one-line summary a collapsed row shows.
  * @param config - the document to summarize.
  * @returns provider count and the total model count.
@@ -489,6 +650,65 @@ export function configCounts(config: ClientConfig): { providers: number; models:
     models += modelsOf(provider).length
   }
   return { providers, models }
+}
+
+/** The empty document the page starts from before the Host value arrives. */
+export function emptyConfig(): ClientConfig {
+  return { providers: {} }
+}
+
+/** Request-body fields the harness owns for every call. */
+const RESERVED_BODY_FIELDS: readonly string[] = ['model', 'messages', 'stream', 'stream_options', 'tools', 'system']
+
+/** What one `extraBody` text edit resolved to. */
+export type ExtraBodyParse =
+  | { readonly kind: 'empty' }
+  | { readonly kind: 'object'; readonly value: Record<string, unknown> }
+  | { readonly kind: 'invalid' }
+  | { readonly kind: 'reserved' }
+
+/** Whether a value is a plain JSON object rather than an array or a scalar. */
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+/**
+ * Spell a stored `extraBody` as the textarea shows it.
+ * @param value - the stored value, when the profile has one.
+ * @returns pretty-printed JSON, or empty text when nothing is stored.
+ */
+export function spellExtraBody(value: unknown): string {
+  return isRecord(value) ? JSON.stringify(value, null, 2) : ''
+}
+
+/**
+ * Read the textarea's text.
+ * @param text - the text as typed.
+ * @returns what the form may store, or why it cannot store it.
+ */
+export function parseExtraBody(text: string): ExtraBodyParse {
+  if (text.trim().length === 0) return { kind: 'empty' }
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(text) as unknown
+  } catch (_invalidJson) {
+    return { kind: 'invalid' }
+  }
+  if (!isRecord(parsed)) return { kind: 'invalid' }
+  return Object.keys(parsed).some(key => RESERVED_BODY_FIELDS.includes(key))
+    ? { kind: 'reserved' }
+    : { kind: 'object', value: parsed }
+}
+
+/**
+ * The copy key explaining why one `extraBody` edit cannot be stored.
+ * @param parse - the parse of the textarea's current text.
+ * @returns the message key, or `undefined` when the text is storable.
+ */
+export function extraBodyFailure(parse: ExtraBodyParse): ServiceLiteKey | undefined {
+  if (parse.kind === 'invalid') return 'extraBodyInvalid'
+  if (parse.kind === 'reserved') return 'extraBodyReserved'
+  return undefined
 }
 
 /** Flip one list value in or out, preserving the canonical order of its vocabulary. */
@@ -505,9 +725,7 @@ export function splitList(text: string): string[] {
 }
 
 /** The protocol label key the page translates an interface type with. */
-export function protocolLabelKey(
-  protocol: InterfaceType | undefined,
-): 'protocolChat' | 'protocolAnthropic' | 'protocolResponses' {
+export function protocolLabelKey(protocol: InterfaceType | undefined): 'protocolAnthropic' | 'protocolResponses' | 'protocolChat' {
   switch (protocol) {
     case 'anthropic-messages': return 'protocolAnthropic'
     case 'openai-responses': return 'protocolResponses'

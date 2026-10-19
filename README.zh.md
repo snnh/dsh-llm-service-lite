@@ -48,12 +48,14 @@ bundle 层之后应用，因此该条目的 `config` 会整体替换那一行的
 安装后请刷新一次 Web 页面：浏览器半区由客户端模块系统提供，新页面在 shell 下次启动时出现，
 位于本 bundle 的页面与其 `llm-service-lite` 行上——该行的 **Configure** 控件打开它。
 
-上游 harness 0.2.1-rc.2 的 **Models** 页面不编辑这些档案：该页面只为自己随附的适配器家族
-（`llm-deepseek`、`llm-pi-ai`）排版，因此 `llm-service-lite` 行只会打开一张指向 patch 文件的
-只读卡片。页内编辑面在本包自己的 **Plugins** 页面：它直接编辑该行自己的 `config`，保存的就是
-Host 已经加载的同一份文档。页面覆盖日常需要的字段；它不渲染的手写字段（`headers`、`extraBody`、
-`imageTokens`、`imagePixelBudget`、`imageMaxBytes`、`catalog`、`retryPolicy`，以及逐模型的
-`defaults`）每次保存都会原样保留，仍可在 patch 里编辑。
+本包在 Host 提供自己的设置命名空间期间，填充 **Models** 页的适配器家族扩展席位：每张
+`llm-service-lite` 服务商卡片都使用本插件自己的编辑器，页面底部则提供同一套添加服务商构建器。
+构建器要求选择预设、路由、协议、端点与可选密钥，并在写入前运行连接测试；编辑器覆盖协议、端点、
+凭据、请求行为、连接测试与模型目录。模型目录是可筛选的紧凑列表，只展开一个模型编辑器；推理档位与
+思考模式是本地化的胶囊开关，**补全能力**会把已核对的家族默认值填进模型留空的字段。`extraBody`
+收在高级折叠区里，JSON 非法时阻止保存。**Plugins** 页里本 bundle 的配置页编辑同一行 `config`。
+它不渲染的手写字段（`headers`、`imageTokens`、`imagePixelBudget`、`imageMaxBytes`、`catalog`、
+`retryPolicy`，以及逐模型的 `defaults`）每次保存都会原样保留，仍可在 patch 里编辑。
 
 托管 profile 里的凭据是引用而不是内联值：把 `apiKeyEnv` 设为引用名（例如
 `DEEPSEEK_API_KEY`），再通过 harness 凭据服务保存密钥、在启动环境里导出它，或写进 harness home
@@ -360,7 +362,7 @@ harness 组装出的对话原样：系统提示词作为开头的 system 消息�
 <a id="known-limitations-and-deferred-work"></a>
 
 - **三条协议，三种形态。** 每个被声明的协议都有自己的传输，各自承载本协议的特性：Responses API 的服务端工具（`web_search_call` item）未被承载，也不发送 `store` 字段，因此想要服务端状态的部署应把它排除在请求路径之外。
-- **配置在插件页或 patch 里，不在 Models 页。** 上游 Models 页面不为本适配器的命名空间排版；服务商在 **Plugins** 页里本 bundle 的配置页编辑（或见[挂载](#mount)写进该 profile 的 `cordis.patch.yml`）。插件页不渲染全部手写字段，也没有模型默认值编辑器；这些仍留在 patch 里。
+- **配置在 Models 页扩展席位、插件页或 patch 里。** 本包填充 Models 页的适配器家族扩展席位，也提供 **Plugins** 页里本 bundle 的配置页；其余手写字段仍写在 profile 的 `cordis.patch.yml` 里（见[挂载](#mount)）。
 - **视频输入以文件抵达，而不是活动画面。** 声明的 `video` 输入以任何附件都会贡献的文件句柄承载，因为这里没有哪条线有视频部件、harness 也还没有视频内容块。`image` 输入已被承载，档案通过 `imageTokens` 声明的计价同样被承载；未声明该字段的路由保留 meter 的结构化启发式；字节旁边也不会附带适配器自撰的说明文本，因此一条被计价的出现次数只计入端点实际收取的视觉 token，不计入本适配器臆造的部分。
 - **适配器侧不重试。** 一次调用就是一次服务商尝试，重试策略由 `dsh-llm-retry` 在持久步骤边界执行，重试会重新推导整个请求。
 - **回放元数据是分协议的。** Messages 传输为自己写下的思考签名维护专属信封，Responses 传输则保留每个 reasoning item（id 与加密载荷）供索要加密回放的模型使用；两种信封都不跨服务商移植。

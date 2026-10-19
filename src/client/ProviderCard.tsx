@@ -17,7 +17,7 @@ import {
 import type { ClientProvider, DiscoveryOutcome, DiscoveryRequest, ProfileProblem, ProviderPatch } from './types.ts'
 import { ModelsEditor } from './ModelsEditor.tsx'
 import { ProviderFields } from './ProviderFields.tsx'
-import { ActionButton, Chip, Field, FieldGroup, TextInput, styles } from './ui.tsx'
+import { ActionButton, Chip, Field, PageStyle, SectionCard, TextInput, styles } from './ui.tsx'
 
 /** Props one provider card receives. */
 export interface ProviderCardProps {
@@ -41,6 +41,8 @@ export interface ProviderCardProps {
   readonly onStoreKey: (ref: string, value: string) => Promise<string | undefined>
   /** Ask the endpoint for its models. */
   readonly onDiscover: (request: DiscoveryRequest) => Promise<DiscoveryOutcome>
+  /** Report whether the extra-body text currently blocks a save. */
+  readonly onExtraBodyValidity?: ((invalid: boolean) => void) | undefined
 }
 
 /**
@@ -56,7 +58,6 @@ export function ProviderCard(props: ProviderCardProps): ReactNode {
   const titleId = useId()
   const bodyId = useId()
   const routeInputId = useId()
-  const routeCodeId = useId()
   const models = modelsOf(provider)
   const protocol = interfaceTypeOf(provider)
   const enabled = provider.enabled !== false
@@ -72,7 +73,6 @@ export function ProviderCard(props: ProviderCardProps): ReactNode {
     if (open) {
       setOpen(false)
       setConfirmRemove(false)
-      // An unapplied route rename is a draft local to the open editor.
       setRenameText(route)
     } else {
       setOpen(true)
@@ -80,26 +80,29 @@ export function ProviderCard(props: ProviderCardProps): ReactNode {
   }
   const applyRename = (): void => {
     if (renameProblem !== undefined || candidate === route) return
-    // The page files providers by route, so this re-keys (and remounts) the card.
     props.onRename(candidate)
   }
   return (
-    <section style={styles['card']} aria-labelledby={titleId}>
-      <div style={styles['cardHead']}>
-        <div style={styles['cardIdentity']}>
-          <h4 id={titleId} style={styles['cardTitle']}>{title}</h4>
-          <div style={styles['inline']}>
-            <code id={routeCodeId} style={styles['routeCode']}>{route}</code>
+    <section className="dsl-provider" aria-labelledby={titleId}>
+      <PageStyle />
+      <div className="dsl-provider-head">
+        <div className="dsl-provider-mark" aria-hidden="true">{route.slice(0, 2).toUpperCase()}</div>
+        <div className="dsl-provider-main">
+          <h4 id={titleId} className="dsl-provider-title">{title}</h4>
+          <div className="dsl-provider-meta">
+            <code className="dsl-code">{route}</code>
             {protocol === undefined ? null : <Chip>{t(protocolLabelKey(protocol))}</Chip>}
-            <Chip on={enabled} title={enabled ? t('stateEnabled') : t('stateDisabled')}>
+            <Chip tone={enabled ? 'success' : 'neutral'} title={enabled ? t('stateEnabled') : t('stateDisabled')}>
               {enabled ? t('stateEnabled') : t('stateDisabled')}
             </Chip>
             <Chip>{t('modelCount', { count: String(models.length) })}</Chip>
           </div>
         </div>
-        <div style={styles['cardActions']}>
+        <div className="dsl-provider-actions">
           <ActionButton
-            primary
+            small
+            primary={!open}
+            outline={open}
             disabled={disabled}
             ariaExpanded={open}
             ariaControls={bodyId}
@@ -111,9 +114,10 @@ export function ProviderCard(props: ProviderCardProps): ReactNode {
             ? null
             : (
               <ActionButton
+                small
                 danger
                 disabled={disabled}
-                ariaDescribedBy={routeCodeId}
+                ariaLabel={t('remove')}
                 onClick={() => { setConfirmRemove(true) }}
               >
                 {t('remove')}
@@ -124,12 +128,14 @@ export function ProviderCard(props: ProviderCardProps): ReactNode {
 
       {confirmRemove
         ? (
-          <div style={styles['confirm']} role="alert">
-            <strong style={styles['error']}>{t('removeConfirm', { route })}</strong>
-            <span style={styles['hint']}>{t('removeConfirmDetail')}</span>
-            <div style={styles['inline']}>
-              <ActionButton danger disabled={disabled} onClick={props.onRemove}>{t('remove')}</ActionButton>
-              <ActionButton onClick={() => { setConfirmRemove(false) }}>{t('cancel')}</ActionButton>
+          <div className="dsl-note dsl-note--danger" role="alert">
+            <div className="dsl-stack" style={styles['grow']}>
+              <strong>{t('removeConfirm', { route })}</strong>
+              <span>{t('removeConfirmDetail')}</span>
+            </div>
+            <div className="dsl-row">
+              <ActionButton small danger disabled={disabled} onClick={props.onRemove}>{t('remove')}</ActionButton>
+              <ActionButton small quiet onClick={() => { setConfirmRemove(false) }}>{t('cancel')}</ActionButton>
             </div>
           </div>
         )
@@ -137,11 +143,11 @@ export function ProviderCard(props: ProviderCardProps): ReactNode {
 
       {open
         ? (
-          <div id={bodyId} style={styles['cardBody']}>
-            <FieldGroup title={t('renameTitle')} hint={t('renameHint')}>
+          <div id={bodyId} className="dsl-provider-body">
+            <SectionCard title={t('renameTitle')} hint={t('renameHint')}>
               <Field label={t('route')} error={renameError} htmlFor={routeInputId}>
-                <div style={styles['inline']}>
-                  <div style={{ flex: '1 1 220px', minWidth: 0 }}>
+                <div className="dsl-row" style={{ flexWrap: 'nowrap' }}>
+                  <div style={styles['grow']}>
                     <TextInput
                       id={routeInputId}
                       value={renameText}
@@ -150,6 +156,8 @@ export function ProviderCard(props: ProviderCardProps): ReactNode {
                     />
                   </div>
                   <ActionButton
+                    small
+                    outline
                     disabled={disabled || candidate === route || renameProblem !== undefined}
                     onClick={applyRename}
                   >
@@ -157,7 +165,7 @@ export function ProviderCard(props: ProviderCardProps): ReactNode {
                   </ActionButton>
                 </div>
               </Field>
-            </FieldGroup>
+            </SectionCard>
             <ProviderFields
               route={route}
               provider={provider}
@@ -165,22 +173,24 @@ export function ProviderCard(props: ProviderCardProps): ReactNode {
               disabled={disabled}
               onPatch={props.onPatch}
               onStoreKey={props.onStoreKey}
+              onDiscover={props.onDiscover}
+              onExtraBodyValidity={props.onExtraBodyValidity}
             />
             <ModelsEditor
               route={route}
               provider={provider}
               t={t}
               disabled={disabled}
-              onPatch={(patch) => { props.onPatch(patch) }}
+              onPatch={props.onPatch}
               onDiscover={props.onDiscover}
             />
-            <div style={styles['inline']}>
-              <ActionButton onClick={toggleOpen}>{t('close')}</ActionButton>
+            <div className="dsl-footer">
+              <ActionButton outline onClick={toggleOpen}>{t('close')}</ActionButton>
             </div>
           </div>
         )
         : null}
-      {models.length === 0 && !open ? <p style={styles['muted']}>{t('modelsEmpty')}</p> : null}
+      {models.length === 0 && !open ? <p className="dsl-hint">{t('modelsEmpty')}</p> : null}
     </section>
   )
 }

@@ -91,7 +91,7 @@ interface FakeForm {
 
 /**
  * A settings form that starts unloaded and is delivered values later, copied
- * from the role-config controller spec's pattern.
+ * from the pattern `/share/work/dsh-role-config/tests/controller.spec.ts` uses.
  */
 function fakeForm(options: { writable?: boolean } = {}): FakeForm {
   const listeners = new Set<() => void>()
@@ -337,7 +337,7 @@ describe('diffConfigOps', () => {
     }
     const draft: ClientConfig = { providers: { alpha: provider } }
     const expected = cleanConfig(draft).providers['alpha']
-    expect(diffConfigOps(emptyConfig(), {}, {}, draft)).toEqual([{
+    expect(diffConfigOps(emptyConfig(), {}, draft)).toEqual([{
       op: 'set',
       path: ['providers', 'alpha'],
       value: expected,
@@ -350,12 +350,9 @@ describe('diffConfigOps', () => {
     const preserved: ClientProvider = { retryPolicy: { attempts: 1 } }
     const current: ClientConfig = { providers: { kept: preserved, gone: preserved } }
     const draft: ClientConfig = { providers: { kept: preserved } }
-    expect(diffConfigOps(current, {}, current, draft)).toEqual([
+    expect(diffConfigOps(current, {}, draft)).toEqual([
       { op: 'unset', path: ['providers', 'gone'] },
     ])
-    // A route only the composition layer declares cannot be removed from here.
-    const inherited: ClientConfig = { providers: { baseOnly: preserved } }
-    expect(diffConfigOps(inherited, inherited, {}, emptyConfig())).toEqual([])
   })
 
   it('sets a field whose draft value differs from the composition layer', () => {
@@ -365,7 +362,7 @@ describe('diffConfigOps', () => {
     const draft: ClientConfig = {
       providers: { alpha: { interfaceType: 'anthropic-messages' } },
     }
-    expect(diffConfigOps(current, {}, current, draft)).toEqual([
+    expect(diffConfigOps(current, {}, draft)).toEqual([
       { op: 'set', path: ['providers', 'alpha', 'interfaceType'], value: 'anthropic-messages' },
     ])
   })
@@ -373,38 +370,22 @@ describe('diffConfigOps', () => {
   it('clears a field the draft puts back to the composition value', () => {
     const base = { providers: { alpha: { displayName: 'Inherited' } } }
     const current: ClientConfig = { providers: { alpha: { displayName: 'Inherited' } } }
-    const user = { providers: { alpha: { displayName: 'Inherited' } } }
     const draft: ClientConfig = { providers: { alpha: { displayName: 'Inherited' } } }
-    expect(diffConfigOps(current, base, user, draft)).toEqual([
+    expect(diffConfigOps(current, base, draft)).toEqual([
       { op: 'unset', path: ['providers', 'alpha', 'displayName'] },
     ])
   })
 
   it('emits nothing for an untouched document', () => {
-    expect(diffConfigOps(emptyConfig(), {}, {}, emptyConfig())).toEqual([])
+    expect(diffConfigOps(emptyConfig(), {}, emptyConfig())).toEqual([])
     // Advanced fields the page does not edit are preserved without a write.
     const preserved: ClientConfig = { providers: { alpha: { retryPolicy: { attempts: 2 } } } }
-    expect(diffConfigOps(preserved, {}, preserved, structuredClone(preserved))).toEqual([])
-    // A user-added profile the page did not change already stores what it stores.
-    const userAdded: ClientConfig = {
-      providers: { alpha: { interfaceType: 'openai-chat-completions', baseURL: 'https://alpha.example.com/v1' } },
-    }
-    expect(diffConfigOps(userAdded, {}, userAdded, structuredClone(userAdded))).toEqual([])
+    expect(diffConfigOps(preserved, {}, structuredClone(preserved))).toEqual([])
   })
 
   it('skips a schema-default value the composition layer does not supply', () => {
     const current: ClientConfig = { providers: { alpha: {} } }
-    const user = { providers: { alpha: {} } }
     const draft: ClientConfig = { providers: { alpha: { maxConcurrent: 3 } } }
-    expect(diffConfigOps(current, {}, user, draft)).toEqual([])
-  })
-
-  it('overrides a composition value even when the draft picks the schema default', () => {
-    const base = { providers: { alpha: { maxConcurrent: 1 } } }
-    const current: ClientConfig = { providers: { alpha: { maxConcurrent: 1 } } }
-    const draft: ClientConfig = { providers: { alpha: { maxConcurrent: 3 } } }
-    expect(diffConfigOps(current, base, {}, draft)).toEqual([
-      { op: 'set', path: ['providers', 'alpha', 'maxConcurrent'], value: 3 },
-    ])
+    expect(diffConfigOps(current, {}, draft)).toEqual([])
   })
 })

@@ -11,27 +11,43 @@
 /** Dictionary key set this page owns. */
 export type ServiceLiteKey =
   // `summary` is filled with the already-inflected summary* fragments, not raw counts.
+  // `summary` is filled with the already-inflected summary* fragments, not raw counts.
   | 'title' | 'description' | 'summary'
   | 'summaryEmpty' | 'summaryNoModels' | 'summaryProviderOne' | 'summaryProviderMany'
   | 'summaryModelOne' | 'summaryModelMany'
   | 'providersTitle' | 'providersEmpty' | 'providersEmptyHint' | 'addProvider' | 'addProviderHint'
-  | 'preset' | 'presetDeepseek' | 'presetOpenai' | 'presetAnthropic' | 'presetLocal' | 'presetCustom'
+  | 'preset' | 'quickPreset' | 'presetDeepseek' | 'presetOpenai' | 'presetAnthropic' | 'presetLocal' | 'presetCustom'
   | 'presetDeepseekHint' | 'presetOpenaiHint' | 'presetAnthropicHint' | 'presetLocalHint' | 'presetCustomHint'
-  | 'create' | 'cancel' | 'edit' | 'close' | 'remove' | 'removeConfirm' | 'removeConfirmDetail'
+  | 'presetDashscope' | 'presetQianfan' | 'presetGlm' | 'presetZhipu' | 'presetKimi'
+  | 'presetMoonshot' | 'presetOpenrouter' | 'presetOllama' | 'presetTencent'
+  | 'presetDashscopeHint' | 'presetQianfanHint' | 'presetGlmHint' | 'presetZhipuHint' | 'presetKimiHint'
+  | 'presetMoonshotHint' | 'presetOpenrouterHint' | 'presetOllamaHint' | 'presetTencentHint'
+  | 'connectionTest' | 'connectionTesting' | 'connectionOk' | 'connectionModels'
+  | 'connectionLatency' | 'connectionFailed' | 'connectionHint'
+  | 'extraBody' | 'extraBodyHint' | 'extraBodyInvalid' | 'extraBodyReserved'
+  | 'thinkingAdaptive' | 'thinkingEnabled' | 'thinkingDisabled'
+  | 'thinkingStyleThinking' | 'thinkingStyleFixed' | 'thinkingStyleEnableThinking'
+  | 'thinkingStyleEffortOnly'
+  | 'create' | 'cancel' | 'edit' | 'close' | 'remove' | 'removeConfirm' | 'removeConfirmDetail' | 'removeProviderNamed'
   | 'route' | 'routeHint' | 'routeLocked' | 'routeRequired' | 'routeReserved' | 'routeTaken' | 'routePattern'
   | 'renameTitle' | 'rename' | 'renameHint'
   | 'displayName' | 'enabled' | 'enabledHint' | 'stateEnabled' | 'stateDisabled'
   | 'protocol' | 'protocolUnset' | 'baseURL' | 'baseURLHint' | 'baseURLPlaceholder'
-  | 'sectionConnection' | 'sectionCredential' | 'sectionBehavior' | 'credentialSectionHint'
+  | 'sectionConnection' | 'connectionSectionHint' | 'sectionCredential' | 'sectionBehavior' | 'credentialSectionHint'
   | 'apiKeyRef' | 'apiKeyRefHint' | 'secret' | 'secretPlaceholder' | 'storeKey' | 'storingKey'
-  | 'keyStored' | 'keyStoreFailed' | 'keyHelp' | 'keyMissing'
+  | 'keyStored' | 'keyStoreFailed' | 'keyHelp' | 'keyOptionalHint' | 'keyMissing'
   | 'providerOptions' | 'concurrency' | 'concurrencyHint' | 'idleTimeout' | 'idleTimeoutHint'
   | 'defaultContext' | 'defaultMaxTokens' | 'defaultCapacityHint'
   | 'labelIncludeUsage' | 'labelPromptCaching' | 'includeUsageHint' | 'promptCachingHint'
-  | 'modelsTitle' | 'modelsEmpty' | 'addModel' | 'removeModel' | 'modelCount'
+  | 'modelsTitle' | 'modelsHint' | 'modelsEmptyTitle' | 'modelsFilteredEmpty' | 'searchModels' | 'searchModelsPlaceholder'
+  | 'modelDefaults' | 'modelDefaultsHint' | 'modelDefaultsNone' | 'modelDefaultsApplied' | 'modelDefaultsAppliedSome' | 'modelDefaultsPending'
+  | 'modelsEmpty' | 'addModel' | 'removeModel' | 'removeModelNamed' | 'modelCount'
   | 'modelId' | 'modelName' | 'modelIdPlaceholder' | 'modelUntitled' | 'contextWindow' | 'maxTokens' | 'modelBudgetHint'
   | 'capabilities' | 'modalities' | 'modalityText' | 'modalityImage' | 'modalityVideo'
-  | 'effort' | 'effortHint' | 'thinking' | 'thinkingHint' | 'thinkingStyle' | 'thinkingStyleDefault'
+  | 'effort' | 'effortHint' | 'effortMinimal' | 'effortLow' | 'effortMedium' | 'effortHigh' | 'effortXhigh' | 'effortMax' | 'effortUltra'
+  | 'effortEmptyHint' | 'effortRecommendation' | 'effortUnsetShort' | 'thinking' | 'thinkingHint' | 'thinkingStyle' | 'thinkingStyleDefault'
+  | 'reasoningCount' | 'toolsOff' | 'modelImageShort' | 'capabilitiesMissingShort' | 'editModel' | 'useRecommended'
+  | 'recommendedCapabilities' | 'noRecommendation'
   | 'reasoningContent' | 'tools' | 'imageOutput' | 'imageOutputHint' | 'responsesEncryptedReplay'
   | 'advancedTitle' | 'advancedHint' | 'protocolAnthropic' | 'protocolChat' | 'protocolResponses'
   | 'protocolRequired' | 'baseURLInvalid' | 'credentialConflict' | 'promptCachingProtocol' | 'includeUsageProtocol'
@@ -41,9 +57,14 @@ export type ServiceLiteKey =
   | 'imageOutputProtocol' | 'imageAccountingWithoutImage' | 'imageBudgetInvalid'
   | 'temperatureInvalid' | 'topPInvalid' | 'topKInvalid' | 'topKProtocol'
   | 'discoveryTitle' | 'discoveryHint' | 'discoveryFetch' | 'discoveryFetching' | 'discoveryEmpty'
-  | 'discoveryRefused' | 'discoveryFound' | 'discoveryAdd' | 'discoveryAddAll' | 'discoveryAllAdded'
+  | 'discoveryRefused' | 'discoveryFound' | 'discoveryAdd' | 'discoveryAddAll' | 'discoveryAddNamed' | 'discoveryAllAdded'
   | 'problemsTitle' | 'problemsHint' | 'appliesHint'
   | 'save' | 'saving' | 'unavailable' | 'readOnly' | 'saveFailed' | 'conflict'
+  | 'apply' | 'applying' | 'custom'
+  | 'modelsCardCaption' | 'modelsCardHint' | 'modelsCardConfigure' | 'modelsCardApplied'
+  | 'modelsCardKeyConfigured' | 'modelsCardKeyMissing'
+  | 'modelsCardRemove' | 'modelsCardRemoveConfirm' | 'modelsCardRemoveHint'
+  | 'modelsFooterTitle' | 'modelsFooterHint' | 'modelsFooterAdded'
 
 /** English copy. */
 export const en: Record<ServiceLiteKey, string> = {
@@ -62,6 +83,7 @@ export const en: Record<ServiceLiteKey, string> = {
   addProvider: 'Add provider',
   addProviderHint: 'Pick a starting point; every field stays editable, and the route name must be one no catalog already owns.',
   preset: 'Starting point',
+  quickPreset: 'Quick pick',
   presetDeepseek: 'DeepSeek (OpenAI-compatible)',
   presetOpenai: 'OpenAI (Responses API)',
   presetAnthropic: 'Anthropic (Messages API)',
@@ -72,6 +94,42 @@ export const en: Record<ServiceLiteKey, string> = {
   presetAnthropicHint: 'Anthropic’s Messages API with prompt caching and a Claude starter model.',
   presetLocalHint: 'A local vLLM or SGLang server on port 8000, serialized to one concurrent request.',
   presetCustomHint: 'Start empty: you choose the protocol, the endpoint, and every model.',
+  presetDashscope: 'Alibaba DashScope',
+  presetQianfan: 'Baidu Qianfan',
+  presetGlm: 'GLM Coding Plan',
+  presetZhipu: 'GLM',
+  presetKimi: 'Kimi Coding Plan',
+  presetMoonshot: 'Moonshot',
+  presetOpenrouter: 'OpenRouter',
+  presetOllama: 'Ollama (local)',
+  presetTencent: 'Tencent Cloud',
+  presetDashscopeHint: 'DashScope’s OpenAI-compatible endpoint.',
+  presetQianfanHint: 'Qianfan’s OpenAI-compatible v2 endpoint.',
+  presetGlmHint: 'GLM’s coding-plan endpoint with its subscription base URL.',
+  presetZhipuHint: 'GLM’s standard OpenAI-compatible endpoint.',
+  presetKimiHint: 'Kimi’s coding-plan endpoint.',
+  presetMoonshotHint: 'Moonshot’s OpenAI-compatible endpoint.',
+  presetOpenrouterHint: 'OpenRouter’s aggregated OpenAI-compatible endpoint.',
+  presetOllamaHint: 'A local Ollama server on port 11434.',
+  presetTencentHint: 'Tencent Cloud’s OpenAI-compatible endpoint.',
+  connectionTest: 'Test connection',
+  connectionTesting: 'Testing…',
+  connectionOk: 'Connected',
+  connectionModels: '{count} models',
+  connectionLatency: '{ms} ms',
+  connectionFailed: 'Connection failed: {message}',
+  connectionHint: 'Ask the drafted endpoint which models it serves before anything is stored. A blank key asks unauthenticated.',
+  extraBody: 'Extra request body (JSON)',
+  extraBodyHint: 'Top-level fields added to every request. The harness-owned fields model, messages, stream, stream_options, tools, and system are refused.',
+  extraBodyInvalid: 'Enter a JSON object, or leave the field blank.',
+  extraBodyReserved: 'This object carries a field the harness owns; remove it before saving.',
+  thinkingAdaptive: 'Adaptive',
+  thinkingEnabled: 'Enabled',
+  thinkingDisabled: 'Disabled',
+  thinkingStyleThinking: 'thinking object',
+  thinkingStyleFixed: 'thinking object (fixed spelling)',
+  thinkingStyleEnableThinking: 'enable_thinking boolean',
+  thinkingStyleEffortOnly: 'Effort only (reasoning_effort)',
   create: 'Create',
   cancel: 'Cancel',
   edit: 'Edit',
@@ -79,6 +137,7 @@ export const en: Record<ServiceLiteKey, string> = {
   remove: 'Remove',
   removeConfirm: 'Remove provider "{route}"?',
   removeConfirmDetail: 'Its models and settings are dropped from this document when the change is saved.',
+  removeProviderNamed: 'Remove provider {route}',
   route: 'Route name',
   routeHint: 'The name a request selects with `provider`; it is also the settings key.',
   routeLocked: 'The route name of an existing provider cannot be changed here; add a new provider and remove the old one instead.',
@@ -100,6 +159,7 @@ export const en: Record<ServiceLiteKey, string> = {
   baseURLHint: 'The base URL of the API (for example https://api.deepseek.com/v1). Leave blank for the protocol default.',
   baseURLPlaceholder: 'https://api.example.com/v1',
   sectionConnection: 'Connection',
+  connectionSectionHint: 'Display name, protocol, endpoint, and whether the route registers.',
   sectionCredential: 'Credential',
   sectionBehavior: 'Request behavior',
   credentialSectionHint: 'The document stores the credential reference; the key itself lives in the harness credentials service.',
@@ -112,6 +172,7 @@ export const en: Record<ServiceLiteKey, string> = {
   keyStored: 'The key is stored. The request resolves it through the credential reference above.',
   keyStoreFailed: 'The key could not be stored: {message}',
   keyHelp: 'Stored through the harness credentials service; the key value never enters the settings document or a model context.',
+  keyOptionalHint: 'Optional. Leave blank to add the key after the profile is created.',
   keyMissing: 'No credential reference names a key yet.',
   providerOptions: 'Request behavior',
   concurrency: 'Concurrent requests',
@@ -126,9 +187,21 @@ export const en: Record<ServiceLiteKey, string> = {
   includeUsageHint: 'Asks the chat-completions stream to end with a usage report.',
   promptCachingHint: 'Sends cache breakpoints with Anthropic Messages requests.',
   modelsTitle: 'Models',
+  modelsHint: 'Models inherit this route’s endpoint. Expand one to edit its capacities and capabilities.',
+  modelsEmptyTitle: 'No models yet',
+  modelsFilteredEmpty: 'No model matches this filter.',
+  searchModels: 'Filter',
+  searchModelsPlaceholder: 'Filter by id or name',
+  modelDefaults: 'Fill capabilities',
+  modelDefaultsHint: 'Uses the adapter’s documented family defaults for fields a model leaves open.',
+  modelDefaultsNone: 'Every model already has the documented defaults, or none matched.',
+  modelDefaultsApplied: 'Filled documented defaults for {count} models.',
+  modelDefaultsAppliedSome: 'Filled documented defaults for {count} models; {unmatched} had no known defaults.',
+  modelDefaultsPending: '{count} models can use documented defaults',
   modelsEmpty: 'No model declared yet. Requests may still name an id, which is served from the route defaults.',
   addModel: 'Add model',
   removeModel: 'Remove model',
+  removeModelNamed: 'Remove model {model}',
   modelCount: 'Models: {count}',
   modelId: 'Model id',
   modelIdPlaceholder: 'e.g. gpt-5',
@@ -143,9 +216,27 @@ export const en: Record<ServiceLiteKey, string> = {
   modalityImage: 'image',
   modalityVideo: 'video',
   effort: 'Reasoning effort levels',
-  effortHint: 'Comma-separated: minimal, low, medium, high, xhigh, max, ultra.',
+  effortHint: 'Select every level this endpoint accepts; leave all unselected when it accepts none.',
+  effortMinimal: 'Minimal',
+  effortLow: 'Low',
+  effortMedium: 'Medium',
+  effortHigh: 'High',
+  effortXhigh: 'Extra high',
+  effortMax: 'Max',
+  effortUltra: 'Ultra',
+  effortEmptyHint: 'No reasoning level is declared, so the chat model picker will not offer one.',
+  effortUnsetShort: 'No reasoning levels',
+  effortRecommendation: 'Documented levels: {levels}',
+  reasoningCount: 'Reasoning: {count}',
+  toolsOff: 'No tools',
+  modelImageShort: 'Image output',
+  capabilitiesMissingShort: 'Defaults available',
+  editModel: 'Edit model',
+  useRecommended: 'Use recommended',
+  recommendedCapabilities: 'Documented defaults',
+  noRecommendation: 'No researched defaults for this family.',
   thinking: 'Thinking modes',
-  thinkingHint: 'Comma-separated: adaptive, enabled, disabled.',
+  thinkingHint: 'Select every mode this endpoint accepts.',
   thinkingStyle: 'Thinking switch',
   thinkingStyleDefault: 'Effort only (no switch)',
   reasoningContent: 'Returns reasoning in reasoning_content',
@@ -153,8 +244,8 @@ export const en: Record<ServiceLiteKey, string> = {
   imageOutput: 'Answers with images',
   imageOutputHint: 'The adapter stores generated images through the attachment provider and republishes them as image blocks.',
   responsesEncryptedReplay: 'Replays signed reasoning items (Responses)',
-  advancedTitle: 'Advanced fields',
-  advancedHint: 'Hand-written fields such as headers, extraBody, image budgets, imageTokens, catalog, and retryPolicy are preserved by every save but are edited in the profile patch instead.',
+  advancedTitle: 'Advanced request body',
+  advancedHint: 'The object is merged into every request body as-is. Model, messages, and streaming fields stay owned by the adapter.',
   protocolAnthropic: 'Anthropic Messages',
   protocolChat: 'OpenAI chat completions',
   protocolResponses: 'OpenAI Responses',
@@ -191,6 +282,7 @@ export const en: Record<ServiceLiteKey, string> = {
   discoveryFound: 'Advertised models: {count}',
   discoveryAdd: 'Add',
   discoveryAddAll: 'Add all',
+  discoveryAddNamed: 'Add {model}',
   discoveryAllAdded: 'Every model the endpoint advertised is already declared.',
   problemsTitle: 'Fix before saving',
   problemsHint: 'The save stays disabled until each finding below is fixed.',
@@ -201,6 +293,21 @@ export const en: Record<ServiceLiteKey, string> = {
   readOnly: 'This deployment stores settings read-only; the document below cannot be changed here.',
   saveFailed: 'The Host refused this document; the details are in the problems above or the harness log.',
   conflict: 'The settings changed elsewhere after this draft was read. Reopen the page and edit the new document.',
+  apply: 'Apply',
+  applying: 'Applying…',
+  custom: 'Custom endpoint',
+  modelsCardCaption: 'LLM Service Lite',
+  modelsCardHint: 'This route is served by the LLM Service Lite plugin; edit it here or on the plugin\'s own page.',
+  modelsCardConfigure: 'Configure provider',
+  modelsCardApplied: 'Provider settings applied.',
+  modelsCardKeyConfigured: 'Key configured',
+  modelsCardKeyMissing: 'No key configured',
+  modelsCardRemove: 'Remove from settings',
+  modelsCardRemoveConfirm: 'Remove route "{route}" from the user settings layer?',
+  modelsCardRemoveHint: 'This route is declared only by your settings; removing it makes the provider disappear. A route pinned by the composition layer is unaffected.',
+  modelsFooterTitle: 'LLM Service Lite providers',
+  modelsFooterHint: 'A new route is written to this deployment\'s settings; the Host mounts it after the next settings read.',
+  modelsFooterAdded: 'Added route "{route}"; the Host will show it after mounting.',
 }
 
 /** Chinese copy. */
@@ -220,6 +327,7 @@ export const zh: Record<ServiceLiteKey, string> = {
   addProvider: '添加服务商',
   addProviderHint: '选一个起点；所有字段都可再修改，路由名必须是目录没有占用的名字。',
   preset: '起点',
+  quickPreset: '快速选择',
   presetDeepseek: 'DeepSeek（OpenAI 兼容）',
   presetOpenai: 'OpenAI（Responses API）',
   presetAnthropic: 'Anthropic（Messages API）',
@@ -230,6 +338,42 @@ export const zh: Record<ServiceLiteKey, string> = {
   presetAnthropicHint: 'Anthropic 的 Messages API，附带提示缓存和一个 Claude 起步模型。',
   presetLocalHint: '监听 8000 端口的本地 vLLM 或 SGLang 服务，同时只发一个请求。',
   presetCustomHint: '从空白开始：协议、端点和每个模型都由你决定。',
+  presetDashscope: '阿里云百炼（DashScope）',
+  presetQianfan: '百度千帆',
+  presetGlm: 'GLM 编码套餐',
+  presetZhipu: 'GLM',
+  presetKimi: 'Kimi 编码套餐',
+  presetMoonshot: 'Moonshot',
+  presetOpenrouter: 'OpenRouter',
+  presetOllama: 'Ollama（本地）',
+  presetTencent: '腾讯云',
+  presetDashscopeHint: 'DashScope 的 OpenAI 兼容端点。',
+  presetQianfanHint: '千帆的 OpenAI 兼容 v2 端点。',
+  presetGlmHint: 'GLM 编码套餐端点，使用订阅版基础地址。',
+  presetZhipuHint: 'GLM 标准 OpenAI 兼容端点。',
+  presetKimiHint: 'Kimi 编码套餐端点。',
+  presetMoonshotHint: 'Moonshot 的 OpenAI 兼容端点。',
+  presetOpenrouterHint: 'OpenRouter 的聚合 OpenAI 兼容端点。',
+  presetOllamaHint: '本机 11434 端口上的 Ollama 服务。',
+  presetTencentHint: '腾讯云的 OpenAI 兼容端点。',
+  connectionTest: '测试连接',
+  connectionTesting: '测试中…',
+  connectionOk: '已连接',
+  connectionModels: '{count} 个模型',
+  connectionLatency: '{ms} 毫秒',
+  connectionFailed: '连接失败：{message}',
+  connectionHint: '在写入任何内容之前，询问草稿里的端点提供哪些模型。密钥留空则以未认证方式询问。',
+  extraBody: '额外请求体（JSON）',
+  extraBodyHint: '添加到每次请求顶层的字段。harness 自己持有的 model、messages、stream、stream_options、tools 和 system 会被拒绝。',
+  extraBodyInvalid: '请输入 JSON 对象，或留空。',
+  extraBodyReserved: '这个对象包含 harness 自己持有的字段；请先移除再保存。',
+  thinkingAdaptive: '自适应',
+  thinkingEnabled: '开启',
+  thinkingDisabled: '关闭',
+  thinkingStyleThinking: 'thinking 对象',
+  thinkingStyleFixed: 'thinking 对象（固定写法）',
+  thinkingStyleEnableThinking: 'enable_thinking 布尔值',
+  thinkingStyleEffortOnly: '仅 reasoning_effort（只发档位）',
   create: '创建',
   cancel: '取消',
   edit: '编辑',
@@ -237,6 +381,7 @@ export const zh: Record<ServiceLiteKey, string> = {
   remove: '删除',
   removeConfirm: '删除服务商「{route}」？',
   removeConfirmDetail: '保存这份文档时，它的模型与设置会一并从配置里移除。',
+  removeProviderNamed: '删除服务商 {route}',
   route: '路由名',
   routeHint: '请求用 `provider` 选择的名字，也是设置里的键。',
   routeLocked: '已有服务商的路由名不能在这里改；请新增一个服务商并删除旧的。',
@@ -258,6 +403,7 @@ export const zh: Record<ServiceLiteKey, string> = {
   baseURLHint: 'API 的 base URL（例如 https://api.deepseek.com/v1）。留空则使用协议默认端点。',
   baseURLPlaceholder: 'https://api.example.com/v1',
   sectionConnection: '连接',
+  connectionSectionHint: '显示名、线协议、端点，以及这条路由是否注册。',
   sectionCredential: '凭据',
   sectionBehavior: '请求行为',
   credentialSectionHint: '文档只保存凭据引用；密钥本身由 harness 凭据服务保管。',
@@ -270,6 +416,7 @@ export const zh: Record<ServiceLiteKey, string> = {
   keyStored: '密钥已保存，请求会通过上面的凭据引用解析它。',
   keyStoreFailed: '密钥保存失败：{message}',
   keyHelp: '密钥经 harness 凭据服务保存，不会进入设置文档，也不会进入模型上下文。',
+  keyOptionalHint: '可选；留空可在创建资料后再补充密钥。',
   keyMissing: '还没有凭据引用指向任何密钥。',
   providerOptions: '请求行为',
   concurrency: '并发请求数',
@@ -284,9 +431,21 @@ export const zh: Record<ServiceLiteKey, string> = {
   includeUsageHint: '让 chat-completions 流在结束时附带用量报告。',
   promptCachingHint: '在 Anthropic Messages 请求里发送缓存断点。',
   modelsTitle: '模型',
+  modelsHint: '模型继承本路由的端点。展开一个模型即可编辑容量与能力。',
+  modelsEmptyTitle: '还没有模型',
+  modelsFilteredEmpty: '没有匹配当前筛选的模型。',
+  searchModels: '筛选',
+  searchModelsPlaceholder: '按 id 或名称筛选',
+  modelDefaults: '补全能力',
+  modelDefaultsHint: '按适配器已核对的家族默认值，补全模型留空的能力字段。',
+  modelDefaultsNone: '所有模型已具备默认值，或没有匹配到已知家族。',
+  modelDefaultsApplied: '已为 {count} 个模型补全家族默认值。',
+  modelDefaultsAppliedSome: '已补全 {count} 个模型；{unmatched} 个没有已知默认值。',
+  modelDefaultsPending: '{count} 个模型可按文档补全',
   modelsEmpty: '还没有声明模型。请求仍可直接点名某个 id，由路由默认值服务。',
   addModel: '添加模型',
   removeModel: '删除模型',
+  removeModelNamed: '删除模型 {model}',
   modelCount: '模型：{count}',
   modelId: '模型 id',
   modelIdPlaceholder: '例如 gpt-5',
@@ -301,9 +460,27 @@ export const zh: Record<ServiceLiteKey, string> = {
   modalityImage: '图像',
   modalityVideo: '视频',
   effort: '推理档位',
-  effortHint: '逗号分隔：minimal、low、medium、high、xhigh、max、ultra。',
+  effortHint: '选择该端点接受的每个档位；不支持时全部留空。',
+  effortMinimal: 'Minimal',
+  effortLow: '低',
+  effortMedium: '中',
+  effortHigh: '高',
+  effortXhigh: '极高',
+  effortMax: 'Max',
+  effortUltra: 'Ultra',
+  effortEmptyHint: '未声明推理档位，聊天页的模型选择器不会显示推理等级。',
+  effortUnsetShort: '无推理档位',
+  effortRecommendation: '文档档位：{levels}',
+  reasoningCount: '推理 {count} 档',
+  toolsOff: '无工具',
+  modelImageShort: '图片输出',
+  capabilitiesMissingShort: '可补全',
+  editModel: '编辑模型',
+  useRecommended: '使用推荐',
+  recommendedCapabilities: '文档默认值',
+  noRecommendation: '没有该家族的核对默认值。',
   thinking: '思考模式',
-  thinkingHint: '逗号分隔：adaptive、enabled、disabled。',
+  thinkingHint: '选择该端点接受的每个思考模式。',
   thinkingStyle: '思考开关写法',
   thinkingStyleDefault: '只发档位（无开关）',
   reasoningContent: '在 reasoning_content 返回推理',
@@ -311,8 +488,8 @@ export const zh: Record<ServiceLiteKey, string> = {
   imageOutput: '会用图片作答',
   imageOutputHint: '适配器会经附件提供方落盘生成的图片，并重新发布为图片块。',
   responsesEncryptedReplay: '回传签名推理条目（Responses）',
-  advancedTitle: '高级字段',
-  advancedHint: 'headers、extraBody、图片预算、imageTokens、catalog、retryPolicy 等手写字段每次保存都会原样保留，但请在 profile patch 里编辑。',
+  advancedTitle: '高级请求体',
+  advancedHint: '该对象会原样合并到每个请求体；模型、消息与流式字段仍由适配器管理。',
   protocolAnthropic: 'Anthropic Messages',
   protocolChat: 'OpenAI chat completions',
   protocolResponses: 'OpenAI Responses',
@@ -349,6 +526,7 @@ export const zh: Record<ServiceLiteKey, string> = {
   discoveryFound: '公布的模型：{count}',
   discoveryAdd: '添加',
   discoveryAddAll: '全部添加',
+  discoveryAddNamed: '添加 {model}',
   discoveryAllAdded: '端点公布的模型都已经声明过了。',
   problemsTitle: '保存前需要修复',
   problemsHint: '修复下面的每一项之前，保存按钮保持禁用。',
@@ -359,4 +537,19 @@ export const zh: Record<ServiceLiteKey, string> = {
   readOnly: '当前部署只把设置存在内存里，下面的文档不能在这里修改。',
   saveFailed: 'Host 拒绝了这份文档；详情见上面的问题列表或 harness 日志。',
   conflict: '读取这份草稿之后，设置已在别处被修改。请重新打开页面并编辑新文档。',
+  apply: '应用',
+  applying: '应用中…',
+  custom: '自定义端点',
+  modelsCardCaption: 'LLM 服务（轻量版）',
+  modelsCardHint: '该路由由 LLM 服务（轻量版）插件提供；可以在这里编辑，也可以到插件自己的页面编辑。',
+  modelsCardConfigure: '配置服务商',
+  modelsCardApplied: '服务商设置已应用。',
+  modelsCardKeyConfigured: '已配置密钥',
+  modelsCardKeyMissing: '未配置密钥',
+  modelsCardRemove: '从设置中移除',
+  modelsCardRemoveConfirm: '从用户设置层移除路由「{route}」？',
+  modelsCardRemoveHint: '该路由只由你的设置声明，移除后这个服务商就会消失；由组合层固定的路由不受影响。',
+  modelsFooterTitle: 'LLM 服务（轻量版）服务商',
+  modelsFooterHint: '新路由会写入本部署的设置，Host 重新加载后即可挂载。',
+  modelsFooterAdded: '已添加路由「{route}」，Host 挂载后就会出现在这里。',
 }

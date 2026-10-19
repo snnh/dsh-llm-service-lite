@@ -118,3 +118,24 @@ describe('browser half declaration', () => {
     expect(manifest.name).toBe('@snnh/dsh-llm-service-lite')
   })
 })
+
+describe('browser half declaration', () => {
+  it('publishes the client entry and ships the modules it names', () => {
+    expect(manifest.exports['./client']).toMatchObject({
+      default: './lib/client.js',
+      types: './lib/types/client/index.d.ts',
+    })
+    expect(manifest.files).toContain('lib/client.js')
+    expect(manifest.files).toContain('lib/types/**/*.d.ts')
+  })
+
+  it('declares a web client that injects its locale and Plugins-page host', () => {
+    expect(manifest.dsh?.client?.platform).toBe('web')
+    expect(manifest.dsh?.client?.inject).toContain('@deepseek-ai/dsh-client-locale')
+    expect(manifest.dsh?.client?.inject).toContain('@deepseek-ai/dsh-client-ui-plugin-manager')
+  })
+
+  it('keeps the published package name unchanged', () => {
+    expect(manifest.name).toBe('@snnh/dsh-llm-service-lite')
+  })
+})

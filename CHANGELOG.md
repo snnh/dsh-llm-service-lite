@@ -4,11 +4,47 @@ All notable changes to `@snnh/dsh-llm-service-lite`. The package follows the
 harness line it is built against: `peerDependencies` name that line, while this
 package's own patch releases are independent.
 
-## 0.1.1 — 2026-10-18
+## 0.2.1 — 2026-10-19
 
-Verified against DeepSeek Harness `0.2.1-rc.2` (published tests: 22 files /
-414 cases). The first release to ship the browser half alongside the Host
-plugin.
+### Changed
+
+- **Readable model catalog.** The 34-model editor is now a compact, filterable
+  list with one expanded editor instead of one full card per model. Capacity
+  and reasoning facts stay visible in the row; editing a row no longer pushes
+  the page to six figures of vertical height.
+- **Reasoning controls that match the model.** Effort levels and thinking
+  modes are localized pill toggles. The editor shows the documented levels a
+  family publishes and warns when a model declares none, so the chat model
+  picker no longer silently loses its reasoning selector.
+- **`Fill capabilities`.** The documented family defaults fill only fields a
+  profile left open. A resolved schema may materialize an unset capability list
+  as `[]`; those lists are now treated as unset both in the editor and in the
+  request-path profile resolver, so composed profiles get their family's
+  reasoning ladder instead of an empty selector.
+- **Advanced request body.** `extraBody` is a collapsed disclosure, opens only
+  when the profile actually carries fields, and explains that harness-owned
+  request fields stay owned by the adapter.
+- **Thinking-switch labels.** `thinking`, `fixed`, `enable_thinking`, and
+  `effort_only` are described in operator language instead of internal wire
+  spellings.
+- **Models footer builder.** The section-level add form now forwards the
+  credential and model-discovery operations, so its connection test and API-key
+  save work exactly like the plugin page's builder.
+- **Visual system.** Buttons, inputs, switches, chips, sections, and empty
+  states share one scoped stylesheet with `--dsw-*` tokens and dark-mode-safe
+  fallbacks; the layout collapses to one column in the narrow settings modal.
+
+### Verified
+
+- `pnpm run check` (typecheck + 476 tests) and `pnpm run build`.
+- Live Web UI: Models → 配置服务商 → 补全能力 filled 27 models; `glm-5.3`
+  then exposed `Default / Low / High / Max` in the chat reasoning picker.
+
+## 0.2.0 — 2026-10-19
+
+Verified against DeepSeek Harness `0.2.1-rc.2` (tests: 28 files / 473 cases).
+This release puts provider configuration on the page operators already use:
+the Models settings page.
 
 ### Fixed
 
@@ -64,55 +100,38 @@ plugin.
   `/models` with bearer auth), honours the drafted endpoint over the stored one,
   merges the route's configured headers, validates a one-shot key, and bounds
   the reply at 4 MiB with explicit `DISCOVERY_FAILED`/`INVALID_REQUEST`/
-  `INVALID_CONFIG` outcomes. A caller cancellation that lands while the listing
-  body is being read also reports `ABORTED`, not a discovery failure.
-- **Robustness at protocol edges.** Streamed tool-argument fragments win over a
-  whole `tool_use.input` that a block-start event also stated (instead of being
-  dropped), and a terminal reasoning item never downgrades an encrypted payload
-  an earlier copy carried. A schema-valid but unrepresentable `maxConcurrent`
-  is refused by the schema instead of failing each request, and reordering
-  profiles (or editing one that another adapter's name claim skips) no longer
-  triggers an unnecessary route replacement.
+  `INVALID_CONFIG` outcomes.
 
 ### Changed
 
 - Development baseline moved to harness `0.2.1-rc.2` and cordis `4.0.5`, with
   the runtime `dsh-util-values` dependency on the same line. The
   `^0.2.1-alpha.2` peer ranges still admit the alpha line.
-- `@deepseek-ai/cosmokit` is pinned to the harness line (`1.8.6`) and remains a
-  runtime dependency: the emitted declarations reference its `Dict` type through
-  schemastery's `volatile()`, and `preserveSymlinks` type resolution also needs
-  the root copy beside the peers.
-- Both READMEs corrected: profiles are configured on the bundle's own Plugins
-  page or in the profile's `cordis.patch.yml` (the upstream Models page has no
-  editor for this adapter family), same-id patch rows replace the earlier row and
-  its whole config rather than mounting twice, the per-wire output-cap behavior
-  is stated, route names must be unique across mounted adapters, and the full
-  route/model field reference is documented.
+- The unused `@deepseek-ai/cosmokit` runtime dependency was dropped (it remains
+  a development dependency because `preserveSymlinks` type resolution needs the
+  root copy next to the peers).
+- Both READMEs corrected: profiles are configured in the profile's
+  `cordis.patch.yml` (the upstream Models page has no editor for this adapter
+  family), same-id patch rows replace the earlier row and its whole config
+  rather than mounting twice, the per-wire output-cap behavior is stated, route
+  names must be unique across mounted adapters, and the full route/model field
+  reference is documented.
 
 ### Added
 
-- **Browser half: a provider-configuration page in the Web UI.** The bundle now
-  ships `./client` (`lib/client.js`), registering a page on the Plugins screen
-  under its `llm-service-lite` row (`plugins.row.config`). It lists providers
-  and adds, edits, renames, and removes them; edits protocol, endpoint,
-  concurrency, stream timeout, inherited capacities, and the full model catalog
-  (ids, capacities, modalities, effort levels, thinking modes and switch,
-  reasoning/tool/image-output declarations); stores an API key through the
-  harness credentials service while writing an `apiKeyEnv` reference; and asks
-  the endpoint which models it serves through the Host's protocol-aware
-  discovery. Saves are revision-fenced minimal path operations, so a profile
-  declared in a `cordis.patch.yml` layer keeps inheriting untouched fields, and
-  hand-written fields the page does not render (`headers`, `extraBody`,
-  `imageTokens`, `imageBudgets`, `catalog`, `retryPolicy`, model `defaults`) are
-  preserved.
-- The browser artifact is built by `build/client-bundle.mjs` into the client
-  module system's factory format (`window.__ModuleLoader__`), leaving React and
-  the shared UI packages to the page's frozen module table; client-side
-  development dependencies pin harness `0.2.1-rc.2`.
-- Tests for the browser half: the draft model and validation, the staged
-  controller and its minimal write operations, a rendered page smoke test, and
-  manifest guards for the `dsh.client` declaration.
+- **Models page configuration seats and full add-provider builder.** Every
+  `llm-service-lite` card on **Settings → Models** now gets the plugin's editor
+  (protocol, endpoint, credential, request behavior, extra body, connection
+  test, model catalog) and the section footer gets the same builder. The builder
+  offers DeepSeek, OpenAI, Anthropic, DashScope, Qianfan, GLM, Kimi, Moonshot,
+  OpenRouter, Ollama, Tencent Cloud, local vLLM/SGLang, and a custom route; it
+  tests the drafted endpoint before writing and stores a typed key only after
+  the profile write lands.
+- **Archived capability editor.** Effort levels and thinking modes are edited
+  as checkbox groups, the thinking switch uses labeled choices, and the model
+  catalog keeps modalities, image output, tools, reasoning-content, and
+  encrypted Responses replay declarations. The extra request body is a JSON
+  editor that refuses harness-owned fields and blocks a save on malformed text.
 - `pnpm run check` (source typecheck, test typecheck, full suite) and
   `pnpm run typecheck:tests`; CI now runs it on Node 22 and 24.
 - Unit suites for SSE framing, model discovery, and the live-configuration

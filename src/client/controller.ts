@@ -20,8 +20,8 @@ import {
   sameConfig,
   validateConfig,
 } from './model.ts'
-import { emptyConfig } from './types.ts'
 import {
+  emptyConfig,
   type ClientConfig,
   type ClientProvider,
   type DiscoveryOutcome,
@@ -75,7 +75,7 @@ function storedField(field: string, value: unknown): unknown {
   if (typeof value === 'object' && value !== null && !Array.isArray(value)
     && Object.keys(value as Record<string, unknown>).length === 0) return undefined
   if (field === 'models') {
-    const cleaned = cleanConfig({ providers: { route: { models: value } as ClientProvider } })
+    const cleaned = cleanConfig({ providers: { route: { models: value as ClientProvider['models'] } as ClientProvider } })
       .providers['route']?.models
     return cleaned
   }
@@ -83,38 +83,26 @@ function storedField(field: string, value: unknown): unknown {
 }
 
 /**
- * The minimal path operations moving the stored user layer from what the page
- * read to what it stages.
+ * The minimal path operations moving the stored user layer from the read
+ * document to the staged one.
  *
- * The comparison is against the USER layer, not the resolved value: a field
- * the person never touched already stores what it stored, so it needs no
- * operation at all. A field a person clears falls back to the composition
- * layer (`cordis.patch.yml`) when that layer states it, and a field the page
- * never shows (headers, extraBody, catalog, ...) is left exactly as stored.
- * @param current - resolved section value the draft was seeded from.
+ * A field equal to the value the composition layer already supplies is
+ * cleared rather than written, so an untouched profile keeps inheriting from
+ * `cordis.patch.yml`; a field the page never shows (headers, extraBody,
+ * catalog, ...) is left as stored.
+ * @param current - section value the draft was seeded from.
  * @param base - composition layer under the user layer.
- * @param user - raw user layer, whose presence marks what is already stored.
  * @param draft - the staged document.
  * @returns ordered path operations; empty when the draft stores what is stored.
  */
-export function diffConfigOps(
-  current: ClientConfig,
-  base: unknown,
-  user: unknown,
-  draft: ClientConfig,
-): SettingsFormPathOp[] {
+export function diffConfigOps(current: ClientConfig, base: unknown, draft: ClientConfig): SettingsFormPathOp[] {
   const ops: SettingsFormPathOp[] = []
   const baseProviders = providersOf(base)
-  const userProviders = providersOf(user)
   const routes = new Set([...Object.keys(current.providers), ...Object.keys(draft.providers)])
   for (const route of routes) {
     const next = draft.providers[route]
-    const baseProfile = baseProviders[route]
-    const userProfile = userProviders[route]
     if (next === undefined) {
-      // Only a user-layer entry can be removed from here; a profile the
-      // composition declares stays until the patch that declares it changes.
-      if (userProfile !== undefined) ops.push({ op: 'unset', path: ['providers', route] })
+      if (current.providers[route] !== undefined) ops.push({ op: 'unset', path: ['providers', route] })
       continue
     }
     if (current.providers[route] === undefined) {
@@ -123,31 +111,21 @@ export function diffConfigOps(
       if (cleaned !== undefined) ops.push({ op: 'set', path: ['providers', route], value: cleaned })
       continue
     }
+    const baseProfile = baseProviders[route]
     for (const field of EDITABLE_PROVIDER_FIELDS) {
       const nextValue = storedField(field, next[field])
       const baseValue = storedField(field, baseProfile?.[field])
-      const userValue = storedField(field, userProfile?.[field])
+      if (sameConfig(nextValue, baseValue)) {
+        // Inheriting already: drop any redundant user-layer entry.
+        if (baseValue !== undefined) ops.push({ op: 'unset', path: ['providers', route, field] })
+        continue
+      }
       if (nextValue === undefined) {
-        if (userValue !== undefined) ops.push({ op: 'unset', path: ['providers', route, field] })
+        ops.push({ op: 'unset', path: ['providers', route, field] })
         continue
       }
-      // A field the draft puts back to the composition value drops any
-      // redundant user-layer entry, even when that entry already holds it.
-      if (baseValue !== undefined && sameConfig(nextValue, baseValue)) {
-        if (userValue !== undefined) ops.push({ op: 'unset', path: ['providers', route, field] })
-        continue
-      }
-      if (sameConfig(nextValue, userValue)) continue
-      // A composition-layer value differs from the draft, so the user layer has
-      // to override it; otherwise a value equal to the schema default with
-      // nothing beneath it needs no user-layer entry.
-      if (baseValue !== undefined) {
-        ops.push({ op: 'set', path: ['providers', route, field], value: nextValue })
-        continue
-      }
-      if (userValue !== undefined || !sameConfig(nextValue, FIELD_DEFAULTS[field])) {
-        ops.push({ op: 'set', path: ['providers', route, field], value: nextValue })
-      }
+      if (baseValue === undefined && sameConfig(nextValue, FIELD_DEFAULTS[field])) continue
+      ops.push({ op: 'set', path: ['providers', route, field], value: nextValue })
     }
   }
   return ops
@@ -261,7 +239,7 @@ export class ServiceLitePageController {
     this.saving = true
     this.failed = false
     this.publish()
-    const ops = diffConfigOps(this.current(), snapshot.base, snapshot.user, draft)
+    const ops = diffConfigOps(this.current(), snapshot.base, draft)
     try {
       if (ops.length === 0) {
         this.draft = undefined

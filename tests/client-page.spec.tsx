@@ -14,7 +14,6 @@ vi.mock('@deepseek-ai/dsh-client-ui-primitives', () => ({
 }))
 
 import { ServiceLitePage, type ServiceLitePageProps } from '../src/client/ServiceLitePage.tsx'
-import { en } from '../src/client/locales.ts'
 import type { ClientConfig, ServiceLitePageSnapshot } from '../src/client/types.ts'
 
 /** A ready page snapshot with the given overrides. */
@@ -33,10 +32,17 @@ function pageState(overrides: Partial<ServiceLitePageSnapshot> = {}): ServiceLit
   }
 }
 
-/** The English dictionary with its `{placeholder}` interpolation applied. */
+/** The one dictionary entry the summary assertion reads; every other key renders as itself. */
 function translate(key: string, params?: Record<string, unknown>): string {
-  const template = (en as unknown as Record<string, string>)[key] ?? key
-  return template.replace(/\{(\w+)\}/gu, (_match, name: string) => String(params?.[name] ?? `{${name}}`))
+  switch (key) {
+    case 'summary': return `${String(params?.['providers'] ?? 0)}, ${String(params?.['models'] ?? 0)}`
+    case 'summaryProviderMany': return `${String(params?.['count'] ?? 0)} providers`
+    case 'summaryModelMany': return `${String(params?.['count'] ?? 0)} models`
+    case 'summaryProviderOne': return '1 provider'
+    case 'summaryModelOne': return '1 model'
+    case 'summaryNoModels': return `${String(params?.['providers'] ?? 0)}, no models declared yet`
+    default: return key
+  }
 }
 
 /** Props the Plugins page would inject, with the page snapshot bound as the hook. */
@@ -85,8 +91,8 @@ describe('ServiceLitePage', () => {
     const html = render(pageState({ draft: config }), 'page')
     expect(html).toContain('alpha-route')
     expect(html).toContain('Alpha Gateway')
-    expect(html).toContain(en.addProvider)
-    expect(html).toContain(en.providersTitle)
+    expect(html).toContain('addProvider')
+    expect(html).toContain('providersTitle')
   })
 
   it('lists a validation problem with its path and message before a save', () => {
@@ -95,8 +101,8 @@ describe('ServiceLitePage', () => {
       draft: { providers: { alpha: {} } },
       problems: [{ path: 'providers.alpha.interfaceType', key: 'protocolRequired' }],
     }), 'page')
-    expect(html).toContain(en.problemsTitle)
+    expect(html).toContain('problemsTitle')
     expect(html).toContain('providers.alpha.interfaceType')
-    expect(html).toContain(en.protocolRequired)
+    expect(html).toContain('protocolRequired')
   })
 })

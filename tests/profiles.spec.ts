@@ -405,6 +405,34 @@ describe('profile validation', () => {
     } as never)).toThrow(/finite number/)
   })
 
+  it('treats schema-materialized empty capability lists as family defaults', () => {
+    const profile = resolved({
+      models: [{
+        id: 'glm-5.3',
+        capabilities: { effort: [], thinking: [], thinkingStyle: 'thinking' },
+      }],
+    })
+    expect(profile.models[0]).toMatchObject({
+      effort: ['low', 'high', 'max'],
+      effortDefault: 'max',
+      thinking: ['enabled'],
+      thinkingStyle: 'thinking',
+    })
+  })
+
+  it('keeps a declared effort ladder whose family default is not on it', () => {
+    const profile = resolved({
+      models: [{
+        id: 'glm-5.3',
+        capabilities: { effort: ['low', 'high'], thinkingStyle: 'thinking' },
+      }],
+    })
+    expect(profile.models[0]).toMatchObject({
+      effort: ['low', 'high'],
+      effortDefault: undefined,
+    })
+  })
+
   it('materializes an official catalog into this adapter\'s own profile facts', () => {
     const profile = resolvedCatalog({
       catalog: {

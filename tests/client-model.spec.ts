@@ -26,8 +26,11 @@ import {
   cleanConfig,
   configCounts,
   deriveKeyRef,
+  extraBodyFailure,
+  parseExtraBody,
   routeIdProblem,
   presetProfile,
+  spellExtraBody,
   splitList,
   toggleListValue,
   validateConfig,
@@ -442,6 +445,33 @@ describe('draft helpers', () => {
     expect(first).toEqual({ providers: {} })
     first.providers['alpha'] = { interfaceType: CHAT }
     expect(emptyConfig()).toEqual({ providers: {} })
+  })
+})
+
+describe('extra request body', () => {
+  it('spells a stored object for the textarea and treats a missing value as blank', () => {
+    expect(spellExtraBody({ verbosity: 'low', nested: { enabled: true } })).toBe(
+      '{\n  "verbosity": "low",\n  "nested": {\n    "enabled": true\n  }\n}',
+    )
+    expect(spellExtraBody(undefined)).toBe('')
+  })
+
+  it('parses a blank field, a JSON object, malformed JSON, and a non-object', () => {
+    expect(parseExtraBody('   ')).toEqual({ kind: 'empty' })
+    expect(parseExtraBody('{"verbosity":"low"}')).toEqual({
+      kind: 'object',
+      value: { verbosity: 'low' },
+    })
+    expect(parseExtraBody('{oops')).toEqual({ kind: 'invalid' })
+    expect(parseExtraBody('[1,2,3]')).toEqual({ kind: 'invalid' })
+  })
+
+  it('refuses the request fields the harness owns', () => {
+    const parsed = parseExtraBody('{"model":"other","verbosity":"low"}')
+    expect(parsed).toEqual({ kind: 'reserved' })
+    expect(extraBodyFailure(parsed)).toBe('extraBodyReserved')
+    expect(extraBodyFailure(parseExtraBody('{oops'))).toBe('extraBodyInvalid')
+    expect(extraBodyFailure(parseExtraBody('{}'))).toBeUndefined()
   })
 })
 

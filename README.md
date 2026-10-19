@@ -55,14 +55,18 @@ the client module system, so the new page appears on the **Plugins** screen the
 next time the shell boots. It lives on the bundle's page and on its
 `llm-service-lite` row, where that row's **Configure** control opens it.
 
-The upstream **Models** page does not edit these profiles in harness
-0.2.1-rc.2: that page only lays out the adapter families it ships
-(`llm-deepseek`, `llm-pi-ai`), so an `llm-service-lite` row opens a read-only
-card pointing at the patch file. The plugin's own page on the **Plugins** screen
-is the in-page surface instead — it edits the row's own `config`, so a save is
-the same document the Host already loads. The page covers the fields a profile
-needs day to day; hand-written fields it does not render (`headers`,
-`extraBody`, `imageTokens`, `imagePixelBudget`, `imageMaxBytes`, `catalog`,
+The plugin fills the **Models** page's adapter-family extension seats while the
+Host serves its settings namespace: every `llm-service-lite` provider card gets
+the plugin's own editor, and the section footer gets the same add-provider
+builder. The builder asks for a preset, route, protocol, endpoint, optional key,
+and runs a connection test before writing; the editor covers protocol, endpoint,
+credential, request behavior, a connection test, and the model catalog. The
+catalog is a filterable list with one expanded model editor; effort levels and
+thinking modes are localized toggles, and **Fill capabilities** applies the
+documented family defaults to fields a model left open. `extraBody` sits behind
+an advanced disclosure and blocks a save when its JSON is malformed. The plugin's
+page on the **Plugins** screen edits the same row `config`. Hand-written fields it does not
+render (`headers`, `imageTokens`, `imagePixelBudget`, `imageMaxBytes`, `catalog`,
 `retryPolicy`, and the per-model `defaults`) are preserved by every save and
 remain editable in the patch.
 
@@ -259,6 +263,20 @@ Each entry of `models` describes one model the route serves:
 | `imageTokens` | none | Visual-token accounting used to price image-bearing contexts |
 | `defaults` | none | Request parameters (`temperature`, `topP`, `topK`, `maxTokens`) the endpoint wants when the caller states none |
 
+Each entry of `models` describes one model the route serves:
+
+| Field | Default | Meaning |
+|---|---|---|
+| `id` | required | Exact model id sent on the wire and named by `GenerateOptions.model` |
+| `name` | the id | Display name shown by selection surfaces |
+| `contextWindow` | route `defaultContextWindow` | Context capacity in tokens |
+| `maxTokens` | route `defaultMaxTokens` | Output capability the model declares; the Responses wire also uses it as the request cap |
+| `capabilities` | none | Endpoint capabilities declared under [Declare what a model can do](#declare-what-a-model-can-do) |
+| `imagePixelBudget` | source dimensions | Pixel budget (`width × height`) each request image is projected into, or `low` for the published low-detail grid |
+| `imageMaxBytes` | adapter default (2 MiB) | Encoded-byte target for one request image; the encoder keeps the smallest ladder step when no step fits |
+| `imageTokens` | none | Visual-token accounting used to price image-bearing contexts |
+| `defaults` | none | Request parameters (`temperature`, `topP`, `topK`, `maxTokens`) the endpoint wants when the caller states none |
+
 ### Start from an official configuration file
 
 An official deployment publishes one provider file per provider — an API-keyed map of `chat:` entries. `catalog` converts such a file into this adapter's own vocabulary: the API becomes the route's `interfaceType` (`openai-completions` to `openai-chat-completions`, `openai-responses`, `anthropic-messages`), `baseUrl` becomes `baseURL`, a header set every model shares becomes the route's headers, and each chat entry becomes a model with its id, name, `contextWindow`, `maxTokens`, input modalities, and thinking levels. A model's `samplingParams` become its `defaults`, so an endpoint's own sampling settings arrive as configuration rather than as a caller concern. Fields this adapter has no counterpart for — `cost`, `compat` flags it does not model, `inputLimits`, and model types it does not serve — are reported one line each instead of guessed, and the route still serves. A header set every entry shares becomes the route's `headers`; only header sets that disagree, which one route cannot carry, are reported. The profile's own fields win over the conversion; an absent or empty `models` list keeps the catalog's models; and a file that mixes protocols or endpoints, names no chat model, or cannot be read leaves the route with a diagnostic rather than a half-converted one.
@@ -380,7 +398,7 @@ Replayed reasoning is byte-identical to what the provider returned, so a route t
 <a id="known-limitations-and-deferred-work"></a>
 
 - **Three protocols, three shapes.** Every declared protocol has a transport, and each carries that protocol's own features: the Responses API's server-side tools (`web_search_call` items) are not carried, and no `store` field is sent, so a deployment keeps provider-side state out of the request path.
-- **Configuration lives on the plugin page or in the patch, not the Models page.** The upstream Models page does not lay out this adapter's namespace; providers are edited on this bundle's page under **Plugins** (or in the profile's `cordis.patch.yml`, see [Mount](#mount)). The plugin page does not render every hand-written field, and it does not show a Model-defaults editor; those stay in the patch.
+- **Configuration lives on the Models page seats, the plugin page, or in the patch.** The plugin fills the Models page's adapter-family extension seats and the bundle's page under **Plugins**; the profile's `cordis.patch.yml` remains the surface for hand-written fields the editors do not render (see [Mount](#mount)).
 - **Video input arrives as a file, not as moving pictures.** A declared `video` input is carried as the file handle every attachment contributes, because no wire here has a video part and the harness has no video content block yet. `image` input is carried, and so is the token accounting a profile declares through `imageTokens`; a route that declares none keeps the meter's structural heuristic, and no adapter-authored handle text travels beside the bytes, so a priced occurrence counts the visual tokens the endpoint charges and nothing this adapter invented.
 - **No adapter-side retries.** One call is one provider attempt, so the provider's retry policy is executed by `dsh-llm-retry` at the durable step boundary, and a retry re-derives the whole request.
 - **Replay metadata is protocol-specific.** The Messages transport writes and reads its own envelope for thinking signatures, and the Responses transport keeps each reasoning item (id and encrypted payload) for the model that asked for encrypted replay; neither envelope is portable across providers.

@@ -503,6 +503,15 @@ function resolveModel(
     : capabilities.replayReasoning
       ?? capabilities.reasoningContent
       ?? family.replayReasoning
+  // The settings schema materializes an unset list as `[]`. An empty list is a
+  // statement about this profile only when the catalog also states one; for a
+  // hand-written model it means "use the family", exactly like an omitted list.
+  const effort = capabilities.effort === undefined || capabilities.effort.length === 0
+    ? [...family.effort]
+    : [...capabilities.effort]
+  const thinking = capabilities.thinking === undefined || capabilities.thinking.length === 0
+    ? [...family.thinking]
+    : [...capabilities.thinking]
   return {
     id: model.id,
     name: model.name ?? model.id,
@@ -511,9 +520,11 @@ function resolveModel(
     defaults: resolveModelDefaults(provider, model.id, model.defaults, interfaceType),
     family: family.family,
     modalities: modalities.length === 0 ? [...family.modalities] : [...modalities],
-    effort: [...capabilities.effort ?? family.effort],
-    effortDefault: capabilities.effort === undefined ? family.effortDefault : undefined,
-    thinking: [...capabilities.thinking ?? family.thinking],
+    effort,
+    effortDefault: capabilities.effort === undefined || capabilities.effort.length === 0
+      ? family.effortDefault
+      : undefined,
+    thinking,
     thinkingStyle: capabilities.thinkingStyle ?? family.thinkingStyle,
     reasoningContent: capabilities.reasoningContent ?? family.reasoningContent,
     replayReasoning,
