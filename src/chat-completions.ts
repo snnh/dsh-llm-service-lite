@@ -102,7 +102,7 @@ interface WireChunk {
     prompt_tokens?: number
     completion_tokens?: number
     prompt_tokens_details?: { cached_tokens?: number }
-  }
+  } | null
 }
 
 /** Content parts of one translated message. */
@@ -387,7 +387,7 @@ function finishReasonOf(reason: string | undefined, sawDone: boolean, sawOutput:
 /** Validated token accounting from one provider usage report. */
 function usageOf(chunk: WireChunk): TokenUsage | undefined {
   const usage = chunk.usage
-  if (usage === undefined || typeof usage.prompt_tokens !== 'number' || typeof usage.completion_tokens !== 'number') {
+  if (usage === undefined || usage === null || typeof usage.prompt_tokens !== 'number' || typeof usage.completion_tokens !== 'number') {
     return undefined
   }
   const prompt = usage.prompt_tokens
