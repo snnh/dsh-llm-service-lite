@@ -423,6 +423,23 @@ describe('chat-completions stream translation', () => {
     ])
   })
 
+  it('reads a null usage report as no report, not as a malformed one', async () => {
+    // OpenAI-compatible gateways such as mify put `"usage": null` on every
+    // content chunk and report the real counts only on the terminal chunk, so
+    // a null is "nothing to account for yet" rather than a broken report.
+    const chunks = await translate([
+      { choices: [{ finish_reason: null, delta: { content: 'hi' } }], usage: null },
+      { choices: [{ finish_reason: 'stop', delta: {} }], usage: { prompt_tokens: 5, completion_tokens: 2 } },
+    ])
+    expect(chunks).toEqual([
+      { type: 'block-start', index: 0, blockType: 'text' },
+      { type: 'text-delta', index: 0, text: 'hi' },
+      { type: 'block-end', index: 0, block: { type: 'text', text: 'hi' } },
+      { type: 'usage', usage: { inputTokens: 5, outputTokens: 2, totalTokens: 7, cacheReadTokens: 0, cacheWriteTokens: 0 } },
+      { type: 'finish', reason: { kind: 'stop' } },
+    ])
+  })
+
   it('announces a tool call only once its id arrives, keeping earlier fragments', async () => {
     const chunks = await translate([
       delta({ tool_calls: [{ index: 0, function: { name: 'shell', arguments: '{"a"' } }] }),
